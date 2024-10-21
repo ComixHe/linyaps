@@ -57,6 +57,11 @@ void JSONPrinter::printLayerInfo(const api::types::v1::LayerInfo &info)
     std::cout << nlohmann::json(info).dump() << std::endl;
 }
 
+void JSONPrinter::printUABInfo(const api::types::v1::UabMetaInfo &info)
+{
+    std::cout << nlohmann::json(info).dump() << std::endl;
+}
+
 void JSONPrinter::printContent(const QStringList &filePaths)
 {
     QJsonObject obj{ { "content", QJsonArray::fromStringList(filePaths) } };

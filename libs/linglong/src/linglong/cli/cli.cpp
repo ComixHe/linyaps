@@ -18,6 +18,7 @@
 #include "linglong/api/types/v1/State.hpp"
 #include "linglong/api/types/v1/SubState.hpp"
 #include "linglong/package/layer_file.h"
+#include "linglong/package/uab_file.h"
 #include "linglong/runtime/container_builder.h"
 #include "linglong/utils/configure.h"
 #include "linglong/utils/error/error.h"
@@ -1354,10 +1355,8 @@ int Cli::info(std::map<std::string, docopt::value> &args)
     }
 
     QFileInfo file(tier);
-    auto isLayerFile = file.isFile() && file.suffix() == "layer";
-
     // 如果是app，显示app tier信息
-    if (!isLayerFile) {
+    if (!file.isFile()) {
         auto fuzzyRef = package::FuzzyReference::parse(tier);
         if (!fuzzyRef) {
             this->printer.printErr(fuzzyRef.error());
@@ -1389,21 +1388,44 @@ int Cli::info(std::map<std::string, docopt::value> &args)
         return 0;
     }
 
-    // 如果是layer文件，显示layer文件 tier信息
-    const auto layerFile = package::LayerFile::New(tier);
+    auto suffix = file.completeSuffix();
+    if (suffix == "layer") {
+        // 如果是layer文件，显示layer文件 tier信息
+        const auto layerFile = package::LayerFile::New(tier);
 
-    if (!layerFile) {
-        this->printer.printErr(layerFile.error());
+        if (!layerFile) {
+            this->printer.printErr(layerFile.error());
+            return -1;
+        }
+
+        const auto layerInfo = (*layerFile)->metaInfo();
+        if (!layerInfo) {
+            this->printer.printErr(layerInfo.error());
+            return -1;
+        }
+
+        this->printer.printLayerInfo(*layerInfo);
+    } else if (suffix == "uab") {
+        auto uabFileRet = package::UABFile::loadFromFile(file.absoluteFilePath());
+        if (!uabFileRet) {
+            this->printer.printErr(uabFileRet.error());
+            return -1;
+        }
+        auto &uabFile = *uabFileRet;
+
+        auto infoRet = uabFile->getMetaInfo();
+        if (!infoRet) {
+            this->printer.printErr(infoRet.error());
+            return -1;
+        }
+        const auto &info = infoRet->get();
+
+        this->printer.printUABInfo(info);
+    } else {
+        this->printer.printErr(LINGLONG_ERRV("unrecognized file type"));
         return -1;
     }
 
-    const auto layerInfo = (*layerFile)->metaInfo();
-    if (!layerInfo) {
-        this->printer.printErr(layerInfo.error());
-        return -1;
-    }
-
-    this->printer.printLayerInfo(*layerInfo);
     return 0;
 }
 

@@ -13,6 +13,7 @@
 #include "linglong/api/types/v1/RepoConfig.hpp"
 #include "linglong/api/types/v1/State.hpp"
 #include "linglong/api/types/v1/SubState.hpp"
+#include "linglong/api/types/v1/UabMetaInfo.hpp"
 #include "linglong/utils/error/error.h"
 
 #include <QJsonObject>
@@ -39,6 +40,7 @@ public:
     virtual void printReply(const api::types::v1::CommonResult &);
     virtual void printRepoConfig(const api::types::v1::RepoConfig &);
     virtual void printLayerInfo(const api::types::v1::LayerInfo &);
+    virtual void printUABInfo(const api::types::v1::UabMetaInfo &);
     virtual void printTaskState(double percentage,
                                 const QString &message,
                                 api::types::v1::State state,

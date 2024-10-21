@@ -104,6 +104,11 @@ void Printer::printLayerInfo(const api::types::v1::LayerInfo &info)
     std::cout << info.info.dump(4) << std::endl;
 }
 
+void Printer::printUABInfo(const api::types::v1::UabMetaInfo &info)
+{
+    std::cout << nlohmann::json(info).dump(4) << std::endl;
+}
+
 void Printer::printContent(const QStringList &filePaths)
 {
     for (const auto &path : filePaths) {
