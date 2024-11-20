@@ -13,6 +13,17 @@ endif()
 
 pkg_search_module(SECCOMP REQUIRED IMPORTED_TARGET libseccomp)
 
+add_compile_options(
+  -Oz
+  -fno-asynchronous-unwind-tables
+  -fno-rtti
+  -fno-exceptions
+  -fdata-sections
+  -ffunction-sections
+  -flto=auto)
+
+add_link_options(-Wl,--gc-sections,--strip-all,--exclude-libs,ALL -flto=auto)
+
 pfl_add_executable(
   SOURCES
   src/container/container.cpp

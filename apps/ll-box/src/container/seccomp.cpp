@@ -12,10 +12,7 @@
 
 namespace {
 
-#define SYSCALL_PAIR(SYSCALL)                   \
-    {                                           \
-        LL_TOSTRING(SYSCALL), SCMP_SYS(SYSCALL) \
-    }
+#define SYSCALL_PAIR(SYSCALL) { LL_TOSTRING(SYSCALL), SCMP_SYS(SYSCALL) }
 
 std::vector<struct scmp_arg_cmp> toScmpArgCmpArray(const std::vector<linglong::SyscallArg> &args)
 {
@@ -98,46 +95,40 @@ int ConfigSeccomp(const std::optional<linglong::Seccomp> &seccomp)
     int ret;
     scmp_filter_ctx ctx = nullptr;
 
-    try {
-        auto defaultAction = seccompActionMap.at(seccomp->defaultAction);
+    auto defaultAction = seccompActionMap.at(seccomp->defaultAction);
 
-        ctx = seccomp_init(defaultAction);
-        if (ctx == nullptr) {
-            throw std::runtime_error(util::errnoString()
-                                     + " seccomp_init=" + seccomp->defaultAction);
-        }
-        for (auto const &architecture : seccomp->architectures) {
-            auto scmpArch = seccompArchMap.at(architecture);
-            if (seccomp_arch_exist(ctx, scmpArch) == -EEXIST) {
-                ret = seccomp_arch_add(ctx, scmpArch);
-                if (ret != 0) {
-                    throw std::runtime_error(util::errnoString() + " architecture=" + architecture);
-                }
-            }
-        }
-
-        for (auto const &syscall : seccomp->syscalls) {
-            auto action = seccompActionMap.at(syscall.action);
-            auto argc = syscall.args.size();
-            auto args = toScmpArgCmpArray(syscall.args);
-
-            for (auto const &name : syscall.names) {
-                auto sysNumber = toSyscallNumber(name);
-
-                ret = seccomp_rule_add_array(ctx, action, sysNumber, argc, args.data());
-                if (ret != 0) {
-                    throw std::runtime_error(util::errnoString() + " syscall.name=" + name);
-                }
-            }
-        }
-        ret = seccomp_load(ctx);
-    } catch (const std::exception &e) {
-        logErr() << "config seccomp failed:" << e.what();
-        ret = -1;
-    } catch (...) {
-        logErr() << "unknown error";
-        ret = -1;
+    ctx = seccomp_init(defaultAction);
+    if (ctx == nullptr) {
+        logErr() << util::errnoString() + " seccomp_init=" + seccomp->defaultAction;
+        return -1;
     }
+    for (auto const &architecture : seccomp->architectures) {
+        auto scmpArch = seccompArchMap.at(architecture);
+        if (seccomp_arch_exist(ctx, scmpArch) == -EEXIST) {
+            ret = seccomp_arch_add(ctx, scmpArch);
+            if (ret != 0) {
+                logErr() << util::errnoString() + " architecture=" + architecture;
+                return ret;
+            }
+        }
+    }
+
+    for (auto const &syscall : seccomp->syscalls) {
+        auto action = seccompActionMap.at(syscall.action);
+        auto argc = syscall.args.size();
+        auto args = toScmpArgCmpArray(syscall.args);
+
+        for (auto const &name : syscall.names) {
+            auto sysNumber = toSyscallNumber(name);
+
+            ret = seccomp_rule_add_array(ctx, action, sysNumber, argc, args.data());
+            if (ret != 0) {
+                logErr() << util::errnoString() + " syscall.name=" + name;
+                return -1;
+            }
+        }
+    }
+    ret = seccomp_load(ctx);
 
     if (!ctx) {
         seccomp_release(ctx);

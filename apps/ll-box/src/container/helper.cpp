@@ -51,18 +51,17 @@ nlohmann::json readAllContainerJson() noexcept
         return {};
     }
 
-    for (auto entry : std::filesystem::directory_iterator{ dir }) {
+    for (const auto &entry : std::filesystem::directory_iterator{ dir }) {
         std::ifstream containerInfo = entry.path();
         if (!containerInfo.is_open()) {
             continue;
         }
 
-        try {
-            nlohmann::json j = nlohmann::json::parse(containerInfo);
-            result.push_back(j);
-        } catch (const std::exception &e) {
-            logErr() << "parse" << entry.path() << "failed" << e.what();
+        nlohmann::json j = nlohmann::json::parse(containerInfo, nullptr, false);
+        if (j.is_discarded()) {
+            return {};
         }
+        result.push_back(j);
     }
 
     return result;

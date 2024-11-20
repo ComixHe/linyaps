@@ -156,12 +156,8 @@ pid_t findLastBoxFallback(pid_t rootPid) noexcept
         }
 
         pid_t pid{ -1 };
-        try {
-            pid = std::stoi(entry.path().filename().string());
-        } catch (std::invalid_argument &e) {
-            // ignore these directory
-            continue;
-        }
+
+        pid = std::stoi(entry.path().filename().string());
 
         if (pid <= rootPid) {
             continue;
@@ -294,7 +290,7 @@ int exec(struct arg_exec *arg, int argc, char **argv) noexcept
 }
 
 int run(struct arg_run *arg, const std::string &containerID) noexcept
-try {
+{
     if (arg->bundle.at(0) != '/') {
         arg->bundle = std::filesystem::current_path() / arg->bundle;
     }
@@ -312,9 +308,6 @@ try {
 
     linglong::Container container(bundleDir, containerID, runtime);
     return container.Start();
-} catch (const std::exception &e) {
-    logErr() << "run failed:" << e.what();
-    return -1;
 }
 
 int kill(const std::string &containerID, const std::string &signal) noexcept
