@@ -15,21 +15,8 @@ endif()
 get_filename_component(EROFSFUSE_ABS_FILE ${FOUND_erofsfuse_STATIC} ABSOLUTE)
 message(STATUS "found liberofsfuse.a: ${ABS_FILE}")
 
-find_library(FOUND_libdeflate_STATIC "deflate")
-if("${FOUND_libdeflate_STATIC}" STREQUAL "")
-  message(FATAL_ERROR "libdeflate.a not found")
-endif()
-
-get_filename_component(LIBDEFLATE_ABS_FILE ${FOUND_libdeflate_STATIC} ABSOLUTE)
-message(STATUS "found libdeflate.a: ${LIBDEFLATE_ABS_FILE}")
-
-pkg_search_module(elf_static REQUIRED IMPORTED_TARGET libelf)
 pkg_search_module(lz4 REQUIRED IMPORTED_TARGET liblz4)
-pkg_search_module(lzma REQUIRED IMPORTED_TARGET liblzma)
-pkg_search_module(ZLIB REQUIRED IMPORTED_TARGET zlib)
-pkg_search_module(ZSTD REQUIRED IMPORTED_TARGET libzstd)
 pkg_search_module(FUSE REQUIRED IMPORTED_TARGET fuse)
-pkg_search_module(SELINUX REQUIRED IMPORTED_TARGET libselinux)
 
 target_link_libraries(PkgConfig::SELINUX INTERFACE ${SELINUX_STATIC_LIBRARIES})
 target_link_libraries(PkgConfig::FUSE INTERFACE ${FUSE_STATIC_LIBRARIES})
@@ -39,21 +26,16 @@ pfl_add_executable(
   SOURCES
   ./src/main.cpp
   ./src/sha256.h
+  ./src/light_elf.h
   OUTPUT_NAME
   uab-header
   LINK_LIBRARIES
   PRIVATE
   linglong::api
   nlohmann_json::nlohmann_json
-  PkgConfig::SELINUX
-  PkgConfig::elf_static
   PkgConfig::lz4
-  PkgConfig::lzma
-  PkgConfig::ZLIB
-  PkgConfig::ZSTD
   PkgConfig::FUSE
   ${EROFSFUSE_ABS_FILE}
-  ${LIBDEFLATE_ABS_FILE}
   stdc++fs)
 
 set(UAB_HEADER_TARGET)
