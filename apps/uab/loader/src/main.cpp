@@ -7,16 +7,19 @@
 #include "ocppi/runtime/config/types/Config.hpp"
 #include "ocppi/runtime/config/types/Generators.hpp"
 #include "ocppi/runtime/config/types/Hook.hpp"
+#include "ocppi/runtime/config/types/Mount.hpp"
 
 #include <nlohmann/json.hpp>
 
-#include <atomic>
+#include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -24,7 +27,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-static std::atomic_bool bundleFlag{ false };
 static std::filesystem::path containerBundle;
 
 template<typename Func>
@@ -48,7 +50,7 @@ std::string genRandomString() noexcept
     std::uniform_int_distribution<char> dist('A', 'z');
 
     std::string ret;
-    while (ret.size() < 81) {
+    while (ret.size() < 16) {
         auto val = dist(gen);
         if (val >= '[' && val <= '`') {
             continue;
@@ -61,29 +63,36 @@ std::string genRandomString() noexcept
 
 void cleanResource()
 {
-    if (!bundleFlag.load(std::memory_order_relaxed)) {
+    if (containerBundle.empty()) {
+        return;
+    }
+
+    containerBundle.clear();
+    if (::getenv("LINGLONG_UAB_DEBUG") != nullptr) {
         return;
     }
 
     std::error_code ec;
-    if (!std::filesystem::exists(containerBundle, ec) || ec) {
-        std::cerr << "filesystem error:" << containerBundle << " " << ec.message() << std::endl;
+    if (!std::filesystem::exists(containerBundle, ec)) {
+        if (ec) {
+            std::cerr << "filesystem error:" << containerBundle << " " << ec.message() << std::endl;
+            return;
+        }
+
         return;
     }
 
-    if (!std::filesystem::remove_all(containerBundle, ec) || ec) {
+    if (std::filesystem::remove_all(containerBundle, ec) == static_cast<std::uintmax_t>(-1)) {
         std::cerr << "failed to remove directory " << containerBundle << ":" << ec.message()
                   << std::endl;
         return;
     }
-
-    bundleFlag.store(false, std::memory_order_relaxed);
 }
 
 [[noreturn]] static void cleanAndExit(int exitCode) noexcept
 {
     cleanResource();
-    ::_exit(exitCode);
+    ::exit(exitCode);
 }
 
 void handleSig() noexcept
@@ -120,6 +129,36 @@ void applyPatches(ocppi::runtime::config::types::Config &config) noexcept
             std::cerr << "generator " << name << " failed" << std::endl;
         }
     }
+}
+
+[[nodiscard]] bool prepareRootfs(std::filesystem::path baseDir,
+                                 ocppi::runtime::config::types::Config &config) noexcept
+{
+    if (baseDir.empty()) {
+        baseDir = "/";
+        config.annotations.value()["org.deepin.linglong.onlyApp"] = "true";
+    }
+
+    std::error_code ec;
+    auto fsIter = std::filesystem::directory_iterator{ baseDir, ec };
+    if (ec) {
+        std::cerr << "couldn't get directory iterator:" << ec.message() << std::endl;
+        return false;
+    }
+
+    auto mounts = config.mounts.value_or(std::vector<ocppi::runtime::config::types::Mount>{});
+    for (const auto &file : fsIter) {
+        auto path = file.path();
+        mounts.push_back(ocppi::runtime::config::types::Mount{
+          .destination = "/" / path.lexically_relative(baseDir),
+          .options = { { "rbind", "copy-symlink" } },
+          .source = path,
+          .type = "bind",
+        });
+    }
+
+    config.mounts = std::move(mounts);
+    return true;
 }
 
 std::optional<linglong::api::types::v1::PackageInfoV2>
@@ -237,7 +276,11 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
         return -1;
     }
 
-    std::string appID = appInfo->id;
+    if (appInfo->base.empty()) {
+        std::cerr << "couldn't find base of application" << std::endl;
+        return -1;
+    }
+
     const auto &baseStr = appInfo->base;
     auto splitSlash = std::find(baseStr.cbegin(), baseStr.cend(), '/');
     auto splitColon = std::find(baseStr.cbegin(), baseStr.cend(), ':');
@@ -255,25 +298,36 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
 
     auto containerID = genRandomString();
     auto containerBundleDir = bundleDir.parent_path().parent_path() / containerID;
-    if (!std::filesystem::create_directories(containerBundleDir, ec) || ec) {
+    if (!std::filesystem::create_directories(containerBundleDir, ec) && ec) {
         std::cerr << "couldn't create directory " << containerBundleDir << " :" << ec.message()
                   << std::endl;
         return -1;
     }
 
     containerBundle = std::move(containerBundleDir);
-    bundleFlag.store(true, std::memory_order_relaxed);
     defer removeContainerBundleDir{ cleanResource };
 
     auto extraDir = bundleDir / "extra";
-    if (!std::filesystem::exists(extraDir, ec) || ec) {
-        std::cerr << extraDir << " may not exist:" << ec.message() << std::endl;
+    if (!std::filesystem::exists(extraDir, ec)) {
+        if (ec) {
+            std::cerr << "failed to get directory " << extraDir << ":" << ec.message()
+                      << " code:" << ec.value() << std::endl;
+            return -1;
+        }
+
+        std::cerr << extraDir << " not exist." << std::endl;
         return -1;
     }
 
     auto boxBin = extraDir / "ll-box";
-    if (!std::filesystem::exists(boxBin, ec) || ec) {
-        std::cerr << boxBin << " may not exist:" << ec.message() << std::endl;
+    if (!std::filesystem::exists(boxBin, ec)) {
+        if (ec) {
+            std::cerr << "failed to get file " << boxBin << ":" << ec.message()
+                      << " code:" << ec.value() << std::endl;
+            return -1;
+        }
+
+        std::cerr << boxBin << " not exist." << std::endl;
         return -1;
     }
 
@@ -288,11 +342,15 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
 
     auto compatibleFilePath = [&bundleDir](std::string_view layerID) -> std::string {
         std::error_code ec;
-
         auto layerDir = bundleDir / "layers" / layerID;
-        if (!std::filesystem::exists(layerDir, ec) || ec) {
-            std::cerr << "container layer path: " << layerDir << "may not exist:" << ec.message()
-                      << std::endl;
+        if (!std::filesystem::exists(layerDir, ec)) {
+            if (ec) {
+                std::cerr << "get layer directory " << layerDir << " error:" << ec.message()
+                          << " code:" << ec.value() << std::endl;
+                return {};
+            }
+
+            std::cerr << layerDir << " not exist." << std::endl;
             return {};
         }
 
@@ -309,39 +367,59 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
         return {};
     };
 
-    auto layerFilesDir = compatibleFilePath(baseID);
-    if (layerFilesDir.empty()) {
-        std::cerr << "couldn't get compatiblePath of base" << std::endl;
+    auto rootfs = containerBundle / "rootfs";
+    if (!std::filesystem::create_directories(rootfs, ec) && ec) {
+        std::cerr << "couldn't create directory " << rootfs << " :" << ec.message() << std::endl;
         return -1;
     }
 
-    config.root->path = std::move(layerFilesDir);
+    config.root->path = rootfs;
     config.root->readonly = true;
 
+    auto appID = appInfo->id;
     auto annotations = config.annotations.value_or(std::map<std::string, std::string>{});
     annotations["org.deepin.linglong.appID"] = appID;
+
+    bool onlyApp = ::getenv("LINGLONG_UAB_LOADER_ONLY_APP") != nullptr;
+    std::string baseLayerFilesDir;
+    if (!onlyApp) {
+        baseLayerFilesDir = compatibleFilePath(baseID);
+        if (baseLayerFilesDir.empty()) {
+            std::cerr << "couldn't get compatiblePath of base" << std::endl;
+            return -1;
+        }
+
+        annotations["org.deepin.linglong.baseDir"] =
+          std::filesystem::path{ baseLayerFilesDir }.parent_path();
+    }
+
+    std::string runtimeLayerFilesDir;
     if (!runtimeID.empty()) {
-        layerFilesDir = compatibleFilePath(runtimeID);
-        if (layerFilesDir.empty()) {
+        runtimeLayerFilesDir = compatibleFilePath(runtimeID);
+        if (runtimeLayerFilesDir.empty()) {
             std::cerr << "couldn't get compatiblePath of runtime" << std::endl;
             return -1;
         }
 
         annotations["org.deepin.linglong.runtimeDir"] =
-          std::filesystem::path{ layerFilesDir }.parent_path();
+          std::filesystem::path{ runtimeLayerFilesDir }.parent_path();
     }
 
-    layerFilesDir = compatibleFilePath(appID);
-    if (layerFilesDir.empty()) {
+    auto appLayerFilesDir = compatibleFilePath(appID);
+    if (appLayerFilesDir.empty()) {
         std::cerr << "couldn't get compatiblePath of application" << std::endl;
         return -1;
     }
-
-    auto appDir = std::filesystem::path{ layerFilesDir }.parent_path();
+    auto appDir = std::filesystem::path{ appLayerFilesDir }.parent_path();
 
     annotations["org.deepin.linglong.appDir"] = appDir.string();
     annotations["org.deepin.linglong.bundleDir"] = containerBundle.string();
     config.annotations = std::move(annotations);
+
+    if (!prepareRootfs(baseLayerFilesDir, config)) {
+        std::cerr << "couldn't prepare rootfs" << std::endl;
+        return -1;
+    }
 
     // replace commands
     if (!appInfo->command || appInfo->command->empty()) {
@@ -385,20 +463,6 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
 
     applyPatches(config);
 
-    // append ld conf
-    auto ldConfDir = extraDir / "ld.conf.d";
-    if (!std::filesystem::exists(ldConfDir, ec) || ec) {
-        std::cerr << "ld config directory may not exist" << std::endl;
-        return -1;
-    }
-
-    config.mounts->push_back(ocppi::runtime::config::types::Mount{
-      .destination = "/etc/ld.so.conf.d/zz_deepin-linglong-app.conf",
-      .options = { { "ro", "rbind" } },
-      .source = ldConfDir / "zz_deepin-linglong-app.ld.so.conf",
-      .type = "bind",
-    });
-
     // generate ld.so.cache and font cache at runtime
     auto cacheDir = containerBundle / "cache";
     auto ldCacheDir = cacheDir / "ld.so.cache.d";
@@ -427,11 +491,35 @@ int main([[maybe_unused]] int argc, [[maybe_unused]] char **argv) // NOLINT
       .type = "bind",
     });
 
+    // append ld conf
+    auto ldConfDir = extraDir / "ld.conf.d";
+    if (!std::filesystem::exists(ldConfDir, ec)) {
+        if (ec) {
+            std::cerr << "failed to check ld conf directory " << ldConfDir << ":" << ec.message()
+                      << " code:" << ec.value() << std::endl;
+            return -1;
+        }
+
+        std::cerr << ldConfDir << " not exist." << std::endl;
+        return -1;
+    }
+
+    config.mounts->push_back(ocppi::runtime::config::types::Mount{
+      .destination = "/run/linglong/cache/ld.so.conf",
+      .options = { { "ro", "rbind" } },
+      .source = ldConfDir / "zz_deepin-linglong-app.ld.so.conf",
+      .type = "bind",
+    });
+
     auto hooks = config.hooks.value_or(ocppi::runtime::config::types::Hooks{});
     auto startHooks =
       hooks.startContainer.value_or(std::vector<ocppi::runtime::config::types::Hook>{});
     startHooks.push_back(ocppi::runtime::config::types::Hook{
-      .args = std::vector<std::string>{ "/sbin/ldconfig", "-C", "/run/linglong/cache/ld.so.cache" },
+      .args = std::vector<std::string>{ "/sbin/ldconfig",
+                                        "-f",
+                                        "/run/linglong/cache/ld.so.conf",
+                                        "-C",
+                                        "/run/linglong/cache/ld.so.cache" },
       .env = {},
       .path = "/sbin/ldconfig",
       .timeout = {},

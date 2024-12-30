@@ -24,6 +24,7 @@
 #include <unordered_set>
 
 #include <fcntl.h>
+#include <sys/stat.h>
 
 namespace linglong::runtime {
 

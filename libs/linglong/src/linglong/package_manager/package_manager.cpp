@@ -918,6 +918,18 @@ QVariantMap PackageManager::installFromUAB(const QDBusUnixFileDescriptor &fd,
             return;
         }
 
+        auto appLayerInfo = std::find_if(layerInfos.begin(),
+                                         layerInfos.end(),
+                                         [](const linglong::api::types::v1::UabLayer &layer) {
+                                             return layer.info.kind == "app";
+                                         });
+        if (appLayerInfo == layerInfos.end()) {
+            taskRef.updateState(linglong::api::types::v1::State::Failed,
+                                "the contents of this uab file are invalid");
+            return;
+        }
+
+        bool onlyApp = appLayerInfo->info.base.empty();
         utils::Transaction transaction;
         for (const auto &layer : layerInfos) {
             if (isTaskDone(taskRef.subState())) {
@@ -962,6 +974,10 @@ QVariantMap PackageManager::installFromUAB(const QDBusUnixFileDescriptor &fd,
 
             std::vector<std::filesystem::path> overlays;
             bool isAppLayer = layer.info.kind == "app";
+            if (!isAppLayer && onlyApp) { // in this case, other layers should be dropped
+                continue;
+            }
+
             if (isAppLayer) { // it's meaningless for app layer that declare minified is true
                 subRef = std::nullopt;
                 auto ret = uab->extractSignData();
