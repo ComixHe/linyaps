@@ -40,7 +40,7 @@ QVariantMap toQVariantMap(const T &x) noexcept
 }
 
 template<typename T, typename Source>
-error::Result<T> LoadJSON(const Source &content) noexcept
+error::Result<T> LoadJSON(Source &content) noexcept
 {
     LINGLONG_TRACE("load json");
 
@@ -48,11 +48,7 @@ error::Result<T> LoadJSON(const Source &content) noexcept
         auto json = nlohmann::json::parse(content);
         return json.template get<T>();
     } catch (const std::exception &e) {
-        if constexpr (std::is_same_v<Source, std::string>) {
-            return LINGLONG_ERR(QString::fromStdString(content), e);
-        } else {
-            return LINGLONG_ERR(content, e);
-        }
+        return LINGLONG_ERR("failed to parse json", e);
     }
 }
 
@@ -93,14 +89,7 @@ error::Result<T> LoadJSONFile(const std::filesystem::path &filePath) noexcept
         return LINGLONG_ERR("failed to open file");
     }
 
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    if (file.fail()) {
-        return LINGLONG_ERR("failed to read file");
-    }
-
-    std::string content = buffer.str();
-    return LoadJSON<T>(content);
+    return LoadJSON<T>(file);
 }
 
 template<typename T>

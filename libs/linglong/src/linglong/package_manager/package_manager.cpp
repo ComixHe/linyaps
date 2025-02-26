@@ -2272,7 +2272,7 @@ utils::error::Result<void> PackageManager::generateCache(const package::Referenc
         }
     });
 
-    auto container = this->containerBuilder.create({
+    auto containerRet = this->containerBuilder.create({
       .appID = ref.id,
       .containerID = QString::fromStdString(containerID),
       .runtimeDir = runtimeLayerDir,
@@ -2283,9 +2283,10 @@ utils::error::Result<void> PackageManager::generateCache(const package::Referenc
       .mounts = std::move(applicationMounts),
       .masks = {},
     });
-    if (!container) {
-        return LINGLONG_ERR(container);
+    if (!containerRet) {
+        return LINGLONG_ERR(containerRet);
     }
+    auto container = std::move(containerRet).value();
 
     ocppi::runtime::config::types::Process process{};
     process.cwd = "/";
@@ -2316,7 +2317,7 @@ utils::error::Result<void> PackageManager::generateCache(const package::Referenc
 
     ocppi::runtime::RunOption opt{ "" };
     opt.GlobalOption::root = containerStateRoot;
-    auto result = container->data()->run(process, opt);
+    auto result = container->run(process, opt);
     if (!result) {
         return LINGLONG_ERR(result);
     }
