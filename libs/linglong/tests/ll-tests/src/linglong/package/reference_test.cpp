@@ -29,7 +29,7 @@ TEST(Package, Reference)
         auto refer = Reference::parse(vaildCase);
         ASSERT_EQ(refer.has_value(), true)
           << vaildCase.toStdString() << " is vaild reference. Error: "
-          << (refer.has_value() ? "no error" : refer.error().message().toStdString());
+          << (refer.has_value() ? "no error" : refer.error().message());
         ASSERT_EQ(refer->toString().toStdString(), vaildCase.toStdString());
     }
 
@@ -45,7 +45,7 @@ TEST(Package, Reference)
         auto refer = Reference::parse(invaildCase);
         ASSERT_EQ(refer.has_value(), false)
           << invaildCase.toStdString() << " is invaild reference. Error: "
-          << (refer.has_value() ? "no error" : refer.error().message().toStdString());
+          << (refer.has_value() ? "no error" : refer.error().message());
     }
 
     QList<QPair<QString, QString>> vaildFuzzReferences = {
@@ -64,7 +64,7 @@ TEST(Package, Reference)
         auto refer = FuzzyReference::parse(vaildCase.first);
         ASSERT_EQ(refer.has_value(), true)
           << vaildCase.first.toStdString() << " is vaild fuzz reference. Error: "
-          << (refer.has_value() ? "no error" : refer.error().message().toStdString());
+          << (refer.has_value() ? "no error" : refer.error().message());
         ASSERT_EQ(refer->toString().toStdString(), vaildCase.second.toStdString());
     }
 }

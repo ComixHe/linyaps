@@ -8,6 +8,7 @@
 
 #include "linglong/utils/error/error.h"
 
+#include <QDebug>
 #include <QStringList>
 
 #include <optional>

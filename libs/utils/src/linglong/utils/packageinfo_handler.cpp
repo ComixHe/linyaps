@@ -34,7 +34,7 @@ api::types::v1::PackageInfoV2 toPackageInfoV2(const api::types::v1::PackageInfo 
 
 error::Result<api::types::v1::PackageInfoV2> parsePackageInfo(const QString &path)
 {
-    LINGLONG_TRACE("parse package info from file: " + path);
+    LINGLONG_TRACE("parse package info from file: " + path.toStdString());
 
     auto pkgInfo = serialize::LoadJSONFile<api::types::v1::PackageInfoV2>(path);
     if (pkgInfo) {
@@ -44,7 +44,7 @@ error::Result<api::types::v1::PackageInfoV2> parsePackageInfo(const QString &pat
     qDebug() << "not PackageInfoV2, parse with PackageInfo";
     auto oldPkgInfo = serialize::LoadJSONFile<api::types::v1::PackageInfo>(path);
     if (!oldPkgInfo) {
-        return LINGLONG_ERR(oldPkgInfo.error());
+        return LINGLONG_ERR("parse PackageInfo failed", std::move(oldPkgInfo));
     }
 
     return toPackageInfoV2(*oldPkgInfo);
@@ -62,7 +62,7 @@ error::Result<api::types::v1::PackageInfoV2> parsePackageInfo(const nlohmann::js
     qDebug() << "not PackageInfoV2, parse with PackageInfo";
     auto oldPkgInfo = serialize::LoadJSON<api::types::v1::PackageInfo>(json);
     if (!oldPkgInfo) {
-        return LINGLONG_ERR(oldPkgInfo.error());
+        return LINGLONG_ERR("parse PackageInfo failed", std::move(oldPkgInfo));
     }
 
     return toPackageInfoV2(*oldPkgInfo);
@@ -80,7 +80,7 @@ error::Result<api::types::v1::PackageInfoV2> parsePackageInfo(GFile *file)
     qDebug() << "not PackageInfoV2, parse with PackageInfo";
     auto oldPkgInfo = serialize::LoadJSONFile<api::types::v1::PackageInfo>(file);
     if (!oldPkgInfo) {
-        return LINGLONG_ERR(oldPkgInfo.error());
+        return LINGLONG_ERR("parse PackageInfo failed", std::move(oldPkgInfo));
     }
 
     return toPackageInfoV2(*oldPkgInfo);

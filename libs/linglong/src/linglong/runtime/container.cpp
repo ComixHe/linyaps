@@ -130,7 +130,7 @@ Container::Container(ocppi::runtime::config::types::Config cfg,
 utils::error::Result<void> Container::run(const ocppi::runtime::config::types::Process &process,
                                           ocppi::runtime::RunOption &opt) noexcept
 {
-    LINGLONG_TRACE(QString("run container %1").arg(this->id));
+    LINGLONG_TRACE("run container " + this->id.toStdString());
 
     std::error_code ec;
     std::filesystem::path runtimeDir =
@@ -277,7 +277,7 @@ utils::error::Result<void> Container::run(const ocppi::runtime::config::types::P
     auto result = this->cli.run(this->id.toStdString(), bundle, opt);
 
     if (!result) {
-        return LINGLONG_ERR("cli run", result);
+        return LINGLONG_ERR("cli run", std::move(result));
     }
 
     return LINGLONG_OK;

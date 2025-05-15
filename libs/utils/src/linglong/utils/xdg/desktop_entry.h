@@ -28,7 +28,7 @@ public:
 
     static auto New(const QString &filePath) -> error::Result<DesktopEntry>
     {
-        LINGLONG_TRACE(QString("create DesktopEntry for %1").arg(filePath));
+        LINGLONG_TRACE("create DesktopEntry for " + filePath.toStdString());
 
         auto desktopEntryFile = QFile(filePath);
         if (!desktopEntryFile.exists()) {
@@ -89,7 +89,7 @@ public:
 
     auto saveToFile(const QString &filepath) -> error::Result<void>
     {
-        LINGLONG_TRACE(QString("save to %1").arg(filepath));
+        LINGLONG_TRACE("save to " + filepath.toStdString());
 
         g_autoptr(GError) gErr = nullptr;
 
@@ -118,7 +118,7 @@ template <>
                                                  const SectionName &section) const
   -> error::Result<QString>
 {
-    LINGLONG_TRACE(QString("get %1 from %2").arg(key, section));
+    LINGLONG_TRACE("get " + key.toStdString() + " from " + section.toStdString());
 
     g_autoptr(GError) gErr = nullptr;
 

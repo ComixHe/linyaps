@@ -13,6 +13,7 @@
 
 #include "linglong/utils/xdg/desktop_entry.h"
 
+#include <QMap>
 #include <QTemporaryFile>
 
 using namespace linglong::utils::xdg;
@@ -20,7 +21,7 @@ using namespace linglong::utils::xdg;
 TEST(UtilsXDGDesktopEntry, Groups)
 {
     auto entry = DesktopEntry::New("data/utils/xdg/org.deepin.calculator.desktop");
-    ASSERT_EQ(entry.has_value(), true) << entry.error().message().toStdString();
+    ASSERT_EQ(entry.has_value(), true) << entry.error().message();
 
     auto groups = entry->groups();
     ASSERT_EQ(groups.contains(DesktopEntry::MainSection), true) << groups.join(", ").toStdString();
@@ -30,11 +31,11 @@ TEST(UtilsXDGDesktopEntry, Groups)
 TEST(UtilsXDGDesktopEntry, GetString)
 {
     auto entry = DesktopEntry::New("data/utils/xdg/org.deepin.calculator.desktop");
-    ASSERT_EQ(entry.has_value(), true) << entry.error().message().toStdString();
+    ASSERT_EQ(entry.has_value(), true) << entry.error().message();
 
     auto testGetStringValue = [&entry](const QString &key, const QString &expectedValue) {
         auto value = entry->getValue<QString>(key);
-        ASSERT_EQ(value.has_value(), true) << value.error().message().toStdString();
+        ASSERT_EQ(value.has_value(), true) << value.error().message();
         ASSERT_EQ(value->toStdString(), expectedValue.toStdString());
     };
 
@@ -53,13 +54,13 @@ TEST(UtilsXDGDesktopEntry, GetString)
 TEST(UtilsXDGDesktopEntry, SetString)
 {
     auto entry = DesktopEntry::New("data/utils/xdg/org.deepin.calculator.desktop");
-    ASSERT_EQ(entry.has_value(), true) << entry.error().message().toStdString();
+    ASSERT_EQ(entry.has_value(), true) << entry.error().message();
 
     auto testSetStringValue = [&entry](const QString &key, const QString &expectedValue) {
         entry->setValue<QString>(key, expectedValue);
 
         auto value = entry->getValue<QString>(key);
-        ASSERT_EQ(value.has_value(), true) << value.error().message().toStdString();
+        ASSERT_EQ(value.has_value(), true) << value.error().message();
         ASSERT_EQ(value->toStdString(), expectedValue.toStdString());
     };
 
@@ -78,12 +79,12 @@ TEST(UtilsXDGDesktopEntry, SetString)
 TEST(UtilsXDGDesktopEntry, SaveToFile)
 {
     auto entry = DesktopEntry::New("data/utils/xdg/org.deepin.calculator.desktop");
-    ASSERT_EQ(entry.has_value(), true) << entry.error().message().toStdString();
+    ASSERT_EQ(entry.has_value(), true) << entry.error().message();
 
     QTemporaryFile tmpFile;
     tmpFile.open();
     if (!(tmpFile.isOpen() && tmpFile.isWritable())) {
-        qCritical() << "Cannot get a temporary file.";
+        std::cerr << "Cannot get a temporary file.";
         GTEST_SKIP();
     }
     tmpFile.close();
@@ -92,7 +93,7 @@ TEST(UtilsXDGDesktopEntry, SaveToFile)
     ASSERT_EQ(result.has_value(), true);
 
     entry = DesktopEntry::New(tmpFile.fileName());
-    ASSERT_EQ(entry.has_value(), true) << entry.error().message().toStdString();
+    ASSERT_EQ(entry.has_value(), true) << entry.error().message();
 
     const auto testGetStringValueCases = QMap<QString, QString>{
         { "Name", "Calculator" },
@@ -103,7 +104,7 @@ TEST(UtilsXDGDesktopEntry, SaveToFile)
 
     auto testGetStringValue = [&entry](const QString &key, const QString &expectedValue) {
         auto value = entry->getValue<QString>(key);
-        ASSERT_EQ(value.has_value(), true) << value.error().message().toStdString();
+        ASSERT_EQ(value.has_value(), true) << value.error().message();
         ASSERT_EQ(value->toStdString(), expectedValue.toStdString());
     };
 

@@ -16,9 +16,10 @@
 #include <sys/stat.h>
 
 namespace linglong::utils {
-linglong::utils::error::Result<std::string> readFile(std::string filepath)
+linglong::utils::error::Result<std::string> readFile(const std::string &filepath) noexcept
 {
-    LINGLONG_TRACE(QString("read file %1").arg(filepath.c_str()));
+    LINGLONG_TRACE("read file %1" + filepath);
+
     std::error_code ec;
     auto exists = std::filesystem::exists(filepath, ec);
     if (ec) {
@@ -42,9 +43,9 @@ linglong::utils::error::Result<std::string> readFile(std::string filepath)
 }
 
 linglong::utils::error::Result<void> writeFile(const std::string &filepath,
-                                               const std::string &content)
+                                               const std::string &content) noexcept
 {
-    LINGLONG_TRACE(QString("write file %1").arg(filepath.c_str()));
+    LINGLONG_TRACE("write file %1" + filepath);
 
     std::error_code ec;
     auto exists = std::filesystem::exists(filepath, ec);
@@ -80,8 +81,7 @@ calculateDirectorySize(const std::filesystem::path &dir) noexcept
 
     auto fsIter = std::filesystem::recursive_directory_iterator{ dir, ec };
     if (ec) {
-        return LINGLONG_ERR(
-          QString{ "failed to calculate directory size: %1" }.arg(ec.message().c_str()));
+        return LINGLONG_ERR(std::string{ "failed to calculate directory size: " } + ec.message());
     }
 
     for (const auto &entry : fsIter) {
@@ -90,33 +90,34 @@ calculateDirectorySize(const std::filesystem::path &dir) noexcept
             struct stat64 st{};
 
             if (::lstat64(path.c_str(), &st) == -1) {
-                return LINGLONG_ERR(
-                  QString{ "failed to get symlink size: %1" }.arg(::strerror(errno)));
+                return LINGLONG_ERR(std::string{ "failed to get symlink size: " }
+                                    + ::strerror(errno));
             }
 
             size += st.st_size;
             continue;
         }
+
         if (ec) {
-            return LINGLONG_ERR(
-              QString{ "failed to get entry type of %1: %2" }.arg(entry.path().c_str(),
-                                                                  ec.message().c_str()));
+            return LINGLONG_ERR("failed to get entry type of " + entry.path().string() + ": "
+                                + ec.message());
         }
 
         if (entry.is_directory(ec)) {
             struct stat64 st{};
 
             if (::stat64(path.c_str(), &st) == -1) {
-                return LINGLONG_ERR(
-                  QString{ "failed to get directory size: %1" }.arg(::strerror(errno)));
+                return LINGLONG_ERR(std::string{ "failed to get directory size: " }
+                                    + ::strerror(errno));
             }
+
             size += st.st_size;
             continue;
         }
+
         if (ec) {
-            return LINGLONG_ERR(
-              QString{ "failed to get entry type of %1: %2" }.arg(entry.path().c_str(),
-                                                                  ec.message().c_str()));
+            return LINGLONG_ERR(std::string{ "failed to get entry type of " }
+                                + entry.path().string() + ": " + ec.message());
         }
 
         size += entry.file_size();

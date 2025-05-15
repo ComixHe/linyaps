@@ -8,13 +8,15 @@
 
 #include <QDir>
 
+#include <utility>
+
 namespace linglong::utils {
 
 OverlayFS::OverlayFS(QString lowerdir, QString upperdir, QString workdir, QString merged)
-    : lowerdir_(lowerdir)
-    , upperdir_(upperdir)
-    , workdir_(workdir)
-    , merged_(merged)
+    : lowerdir_(std::move(lowerdir))
+    , upperdir_(std::move(upperdir))
+    , workdir_(std::move(workdir))
+    , merged_(std::move(merged))
 {
 }
 
@@ -22,7 +24,7 @@ OverlayFS::~OverlayFS()
 {
     auto res = utils::command::Exec("fusermount", { "-z", "-u", merged_ });
     if (!res) {
-        qWarning() << QString("failed to umount %1 ").arg(merged_) << res.error();
+        qWarning() << QString("failed to umount %1 ").arg(merged_) << res.error().message();
     }
 }
 
@@ -52,7 +54,7 @@ bool OverlayFS::mount()
         QString("lowerdir=%1,upperdir=%2,workdir=%3").arg(lowerdir_, upperdir_, workdir_),
         merged_ });
     if (!ret) {
-        qWarning() << "failed to mount " << ret.error();
+        qWarning() << "failed to mount " << ret.error().message();
     }
 
     return !!ret;
@@ -62,7 +64,7 @@ void OverlayFS::unmount(bool clean)
 {
     auto res = utils::command::Exec("fusermount", { "-z", "-u", merged_ });
     if (!res) {
-        qWarning() << QString("failed to umount %1 ").arg(merged_) << res.error();
+        qWarning() << QString("failed to umount %1 ").arg(merged_) << res.error().message();
     }
 
     if (clean) {

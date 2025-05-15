@@ -100,7 +100,7 @@ std::string validateNonEmptyString(const std::string &parameter)
 linglong::utils::error::Result<linglong::api::types::v1::BuilderProject>
 parseProjectConfig(const QString &filename)
 {
-    LINGLONG_TRACE(QString("parse project config %1").arg(filename));
+    LINGLONG_TRACE("parse project config " + filename.toStdString());
     auto project =
       linglong::utils::serialize::LoadYAMLFile<linglong::api::types::v1::BuilderProject>(filename);
     if (!project) {
@@ -129,21 +129,21 @@ parseProjectConfig(const QString &filename)
     // 校验bese和runtime版本是否合法
     auto baseFuzzyRef = linglong::package::FuzzyReference::parse(project->base.c_str());
     if (!baseFuzzyRef) {
-        return LINGLONG_ERR("failed to parse base field", baseFuzzyRef);
+        return LINGLONG_ERR("failed to parse base field", std::move(baseFuzzyRef));
     }
     auto ret = linglong::package::Version::validateDependVersion(baseFuzzyRef->version.value());
     if (!ret) {
-        return LINGLONG_ERR("base version is not valid", ret);
+        return LINGLONG_ERR("base version is not valid", std::move(ret));
     }
     if (project->runtime) {
         auto runtimeFuzzyRef =
           linglong::package::FuzzyReference::parse(project->runtime.value().c_str());
         if (!runtimeFuzzyRef) {
-            return LINGLONG_ERR("failed to parse runtime field", runtimeFuzzyRef);
+            return LINGLONG_ERR("failed to parse runtime field", std::move(runtimeFuzzyRef));
         }
         ret = linglong::package::Version::validateDependVersion(runtimeFuzzyRef->version.value());
         if (!ret) {
-            return LINGLONG_ERR("runtime version is not valid", ret);
+            return LINGLONG_ERR("runtime version is not valid", std::move(ret));
         }
     }
     return project;
@@ -444,7 +444,7 @@ int handleRepoAdd(linglong::repo::OSTreeRepo &repo, linglong::cli::RepoOptions &
 
     auto ret = repo.setConfig(newCfg);
     if (!ret) {
-        std::cerr << ret.error().message().toStdString() << std::endl;
+        std::cerr << ret.error().message() << std::endl;
         return -1;
     }
 
@@ -476,7 +476,7 @@ int handleRepoRemove(linglong::repo::OSTreeRepo &repo, linglong::cli::RepoOption
     newCfg.repos.erase(existingRepo);
     auto ret = repo.setConfig(newCfg);
     if (!ret) {
-        std::cerr << ret.error().message().toStdString() << std::endl;
+        std::cerr << ret.error().message() << std::endl;
         return -1;
     }
 
@@ -508,7 +508,7 @@ int handleRepoUpdate(linglong::repo::OSTreeRepo &repo, linglong::cli::RepoOption
 
     auto ret = repo.setConfig(newCfg);
     if (!ret) {
-        std::cerr << ret.error().message().toStdString() << std::endl;
+        std::cerr << ret.error().message() << std::endl;
         return -1;
     }
 
@@ -535,7 +535,7 @@ int handleRepoSetDefault(linglong::repo::OSTreeRepo &repo, linglong::cli::RepoOp
         newCfg.defaultRepo = alias;
         auto ret = repo.setConfig(newCfg);
         if (!ret) {
-            std::cerr << ret.error().message().toStdString() << std::endl;
+            std::cerr << ret.error().message() << std::endl;
             return -1;
         }
         qInfo() << "Default repository set to" << QString::fromStdString(alias) << "successfully.";

@@ -15,9 +15,11 @@
 #include "ocppi/cli/CLI.hpp"
 #include "ocppi/cli/crun/Crun.hpp"
 
+#include <QCommandLineOption>
+#include <QCommandLineParser>
 #include <QCoreApplication>
-
-#include <filesystem>
+#include <QDBusServer>
+#include <QMetaObject>
 
 using namespace linglong::utils::global;
 using namespace linglong::utils::dbus;

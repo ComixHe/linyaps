@@ -63,7 +63,7 @@ QStringList getUserEnv(const QStringList &filters)
 linglong::utils::error::Result<QString> Exec(const QString &command,
                                              const QStringList &args) noexcept
 {
-    LINGLONG_TRACE(QString("exec %1 %2").arg(command, args.join(" ")));
+    LINGLONG_TRACE("exec " + command.toStdString() + " " + args.join(" ").toStdString());
     qDebug() << "exec" << command << args;
     QProcess process;
     process.setProgram(command);
@@ -72,11 +72,11 @@ linglong::utils::error::Result<QString> Exec(const QString &command,
     process.start();
 
     if (!process.waitForFinished(-1)) {
-        return LINGLONG_ERR(process.errorString(), process.error());
+        return LINGLONG_ERR(process.errorString().toStdString(), process.error());
     }
 
     if (process.exitCode() != 0) {
-        return LINGLONG_ERR(process.readAllStandardOutput(), process.exitCode());
+        return LINGLONG_ERR(process.readAllStandardOutput().toStdString(), process.exitCode());
     }
 
     return process.readAllStandardOutput();

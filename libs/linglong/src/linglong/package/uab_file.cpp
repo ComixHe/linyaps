@@ -45,13 +45,13 @@ utils::error::Result<std::shared_ptr<UABFile>> UABFile::loadFromFile(int fd) noe
     auto file = std::make_shared<EnableMaker>();
 
     if (!file->open(fd, QIODevice::ReadOnly, FileHandleFlag::AutoCloseHandle)) {
-        return LINGLONG_ERR(QString{ "open uab failed: %1" }.arg(file->errorString()));
+        return LINGLONG_ERR("open uab failed: " + file->errorString().toStdString());
     }
 
     elf_version(EV_CURRENT);
     auto *elf = elf_begin(fd, ELF_C_READ, nullptr);
     if (elf == nullptr) {
-        return LINGLONG_ERR(QString{ "libelf err:" }.arg(elf_errmsg(errno)));
+        return LINGLONG_ERR(std::string{ "libelf err:" } + elf_errmsg(errno));
     }
 
     file->e = elf;
@@ -77,16 +77,16 @@ utils::error::Result<GElf_Shdr> UABFile::getSectionHeader(const QString &section
 
     size_t shdrstrndx{ 0 };
     if (elf_getshdrstrndx(this->e, &shdrstrndx) == -1) {
-        return LINGLONG_ERR(
-          QString{ "failed to get section header index of bundle: %1" }.arg(elf_errmsg(errno)));
+        return LINGLONG_ERR(std::string{ "failed to get section header index of bundle: " }
+                            + elf_errmsg(errno));
     }
 
     Elf_Scn *scn{ nullptr };
     while ((scn = elf_nextscn(this->e, scn)) != nullptr) {
         GElf_Shdr shdr;
         if (gelf_getshdr(scn, &shdr) == nullptr) {
-            return LINGLONG_ERR(
-              QString{ "failed to get section header of bundle: %1" }.arg(elf_errmsg(errno)));
+            return LINGLONG_ERR(std::string{ "failed to get section header of bundle: " }
+                                + elf_errmsg(errno));
         }
 
         auto *sname = elf_strptr(this->e, shdrstrndx, shdr.sh_name);

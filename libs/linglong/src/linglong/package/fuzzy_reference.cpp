@@ -15,7 +15,7 @@ namespace linglong::package {
 
 utils::error::Result<FuzzyReference> FuzzyReference::parse(const QString &raw) noexcept
 {
-    LINGLONG_TRACE("parse fuzz reference string " + raw);
+    LINGLONG_TRACE("parse fuzz reference string " + raw.toStdString());
 
     static auto regexp = []() noexcept {
         QRegularExpression regexp(

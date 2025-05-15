@@ -47,7 +47,8 @@ inline void unregisterDBusObject(QDBusConnection conn, const QString &path)
     error::Error err;
     // FIXME: use real ERROR CODE defined in API.
     if (conn.lastError().isValid()) {
-        return LINGLONG_ERR(conn.lastError().name() + ": " + conn.lastError().message());
+        return LINGLONG_ERR(conn.lastError().name().toStdString() + ": "
+                            + conn.lastError().message().toStdString());
     }
 
     return LINGLONG_ERR("service name existed.");
@@ -66,7 +67,8 @@ inline void unregisterDBusObject(QDBusConnection conn, const QString &path)
     // FIXME: use real ERROR CODE defined in API.
     error::Error err;
     if (conn.lastError().isValid()) {
-        return LINGLONG_ERR(conn.lastError().name() + ": " + conn.lastError().message());
+        return LINGLONG_ERR(conn.lastError().name().toStdString() + ": "
+                            + conn.lastError().message().toStdString());
     }
 
     return LINGLONG_ERR("unknown");

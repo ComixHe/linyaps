@@ -11,16 +11,9 @@
 #include <glib.h>
 #include <tl/expected.hpp>
 
-#include <QDebug>
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QMessageLogContext>
-#include <QString>
-#include <QStringBuilder>
-
 #include <memory>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace linglong::utils::error {
@@ -71,239 +64,176 @@ public:
 
     [[nodiscard]] auto message() const { return pImpl->message(); }
 
+    [[nodiscard]] auto release() && { return std::move(pImpl); }
+
+    template <typename T>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const QString &msg,
-                    const ErrorCode &code) -> Error
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
+                    int code = -1) -> Error
     {
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
         return Error(std::make_unique<details::ErrorImpl>(file,
                                                           line,
-                                                          "default",
-                                                          static_cast<int>(code),
-                                                          trace_msg + ": " + msg,
-                                                          nullptr));
-    }
-
-    static auto
-    Err(const char *file, int line, const QString &trace_msg, const QString &msg, int code = -1)
-      -> Error
-    {
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
                                                           code,
-                                                          trace_msg + ": " + msg,
+                                                          function,
+                                                          trace_msg,
+                                                          std::forward<T>(msg),
                                                           nullptr));
+    }
+
+    template <typename T>
+    static auto Err(const char *file,
+                    int line,
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
+                    ErrorCode code) -> Error
+    {
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
+        return Err(file, line, function, trace_msg, std::forward<T>(msg), static_cast<int>(code));
     }
 
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const QString &msg,
-                    const QFile &qfile) -> Error
+                    const char *function,
+                    const std::string &trace_msg,
+                    const std::string &msg,
+                    const std::exception &err) -> Error
     {
-        return Error(
-          std::make_unique<details::ErrorImpl>(file,
-                                               line,
-                                               "default",
-                                               qfile.error(),
-                                               trace_msg + ": " + msg + ": " + qfile.errorString(),
-                                               nullptr));
+        return Err(file, line, function, trace_msg, msg + ":" + err.what());
     }
 
-    static auto Err(const char *file, int line, const QString &trace_msg, const QFile &qfile)
-      -> Error
+    static auto Err(const char *file,
+                    int line,
+                    const char *function,
+                    const std::string &trace_msg,
+                    const std::string &msg,
+                    std::exception_ptr &&err) -> Error
     {
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          qfile.error(),
-                                                          trace_msg + ": " + qfile.fileName() + ": "
-                                                            + qfile.errorString(),
-                                                          nullptr));
-    }
+        std::string what{ msg };
 
-    static auto
-    Err(const char *file, int line, const QString &trace_msg, std::exception_ptr err, int code = -1)
-      -> Error
-    {
-        QString what = trace_msg + ": ";
         try {
             std::rethrow_exception(std::move(err));
         } catch (const std::exception &e) {
-            what += e.what();
+            what.append(": ").append(e.what());
         } catch (...) {
-            what += "unknown";
+            what.append(": unknown exception");
         }
 
-        return Error(
-          std::make_unique<details::ErrorImpl>(file, line, "default", code, what, nullptr));
+        return Err(file, line, function, trace_msg, std::move(what));
     }
 
+    template <typename T>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const QString &msg,
-                    std::exception_ptr err,
-                    int code = -1) -> Error
-    {
-        QString what = trace_msg + ": " + msg + ": ";
-        try {
-            std::rethrow_exception(std::move(err));
-        } catch (const std::exception &e) {
-            what += e.what();
-        } catch (...) {
-            what += "unknown";
-        }
-
-        return Error(
-          std::make_unique<details::ErrorImpl>(file, line, "default", code, what, nullptr));
-    }
-
-    static auto Err(const char *file, int line, const QString &trace_msg, const std::exception &e)
-      -> Error
-    {
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          -1,
-                                                          trace_msg + ": " + e.what(),
-                                                          nullptr));
-    }
-
-    static auto Err(const char *file,
-                    int line,
-                    const QString &trace_msg,
-                    const QString &msg,
-                    const std::exception &e,
-                    int code = -1) -> Error
-    {
-        QString what = trace_msg + ": " + msg + ": " + e.what();
-
-        return Error(
-          std::make_unique<details::ErrorImpl>(file, line, "default", code, what, nullptr));
-    }
-
-    static auto Err(const char *file,
-                    int line,
-                    const QString &trace_msg,
-                    const QString &msg,
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
                     GError const *const e) -> Error
     {
-        QString new_msg = msg;
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
+        std::string new_msg{ std::forward<T>(msg) };
         if (e != nullptr) {
-            new_msg.append(
-              QString{ " error code:%1, message:%2" }.arg(QString::number(e->code), e->message));
+            new_msg.append(" error code:" + std::to_string(e->code) + " message:" + e->message);
         }
-        return Err(file, line, trace_msg, new_msg);
+
+        return Err(file, line, function, trace_msg, std::move(new_msg));
     }
 
+    template <typename T>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const char *msg,
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
                     const std::system_error &e) -> Error
     {
-        return Err(file, line, trace_msg, msg, e, e.code().value());
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
+        std::string new_msg{ std::forward<T>(msg) };
+        new_msg.append(": ");
+        new_msg.append(e.what());
+
+        return Err(file, line, function, trace_msg, std::move(new_msg), e.code().value());
     }
 
+    template <typename T>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const QString &msg,
-                    const std::system_error &e) -> Error
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
+                    Error &&cause,
+                    int code = -1) -> Error
     {
-        return Err(file, line, trace_msg, msg, e, e.code().value());
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
+        return Error(std::make_unique<details::ErrorImpl>(file,
+                                                          line,
+                                                          code,
+                                                          function,
+                                                          trace_msg,
+                                                          std::forward<T>(msg),
+                                                          std::move(cause).release()));
     }
 
+    template <typename T, typename Value>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const std::string &msg,
-                    const std::system_error &e) -> Error
-    {
-        return Err(file, line, trace_msg, msg.c_str(), e, e.code().value());
-    }
-
-    template <typename Value>
-    static auto Err(const char *file,
-                    int line,
-                    const QString &trace_msg,
-                    const QString &msg,
+                    const char *function,
+                    const std::string &trace_msg,
+                    T &&msg,
                     tl::expected<Value, Error> &&cause) -> Error
     {
-        Q_ASSERT(!cause.has_value());
+        static_assert(std::is_convertible_v<T, std::string>, "msg cannot convert to std::string");
+        assert(!cause.has_value());
 
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          cause.error().code(),
-                                                          trace_msg + ": " + msg,
-                                                          std::move(cause.error().pImpl)));
+        return Err(file, line, function, trace_msg, std::forward<T>(msg), std::move(cause).error());
     }
 
     template <typename Value>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
+                    const char *function,
+                    const std::string &trace_msg,
                     tl::expected<Value, Error> &&cause) -> Error
     {
-        Q_ASSERT(!cause.has_value());
-
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          cause.error().code(),
-                                                          trace_msg,
-                                                          std::move(cause.error().pImpl)));
+        assert(!cause.has_value());
+        return Err(file, line, function, trace_msg, "", std::move(cause).error());
     }
 
-    static auto
-    Err(const char *file, int line, const QString &trace_msg, const QString &msg, Error &&cause)
-      -> Error
+    static auto Err(const char *file,
+                    int line,
+                    const char *function,
+                    const std::string &trace_msg,
+                    Error &&cause) -> Error
     {
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          cause.code(),
-                                                          trace_msg + ": " + msg,
-                                                          std::move(cause.pImpl)));
-    }
-
-    static auto Err(const char *file, int line, const QString &trace_msg, Error &&cause) -> Error
-    {
-
-        return Error(std::make_unique<details::ErrorImpl>(file,
-                                                          line,
-                                                          "default",
-                                                          cause.code(),
-                                                          trace_msg,
-                                                          std::move(cause.pImpl)));
+        return Err(file, line, function, trace_msg, "", std::move(cause));
     }
 
     template <typename Value>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
+                    const char *function,
+                    const std::string &trace_msg,
                     tl::expected<Value, std::exception_ptr> &&cause,
                     int code = -1) -> Error
     {
-        Q_ASSERT(!cause.has_value());
-
-        return Err(file, line, trace_msg, cause.error(), code);
+        assert(!cause.has_value());
+        return Err(file, line, function, trace_msg, std::move(cause).error(), code);
     }
 
     template <typename Value>
     static auto Err(const char *file,
                     int line,
-                    const QString &trace_msg,
-                    const QString &msg,
+                    const char *function,
+                    const std::string &trace_msg,
+                    const std::string &msg,
                     tl::expected<Value, std::exception_ptr> &&cause) -> Error
     {
-        Q_ASSERT(!cause.has_value());
-
-        return Err(file, line, trace_msg, msg, cause.error());
+        assert(!cause.has_value());
+        return Err(file, line, function, trace_msg, msg, std::move(cause).error());
     }
 
 private:
@@ -321,7 +251,7 @@ using Result = tl::expected<Value, Error>;
 } // namespace linglong::utils::error
 
 // Use this macro to define trace message at the begining of function
-#define LINGLONG_TRACE(message) QString linglong_trace_message = message;
+#define LINGLONG_TRACE(message) std::string linglong_trace_message{ message }; // NOLINT
 
 // Use this macro to create new error or wrap an existing error
 // LINGLONG_ERR(message, code =-1)
@@ -338,39 +268,34 @@ using Result = tl::expected<Value, Error>;
 // LINGLONG_ERR(message, /* tl::expected<Value,std::exception_ptr>&& */, code=-1)
 // LINGLONG_ERR(/* tl::expected<Value,std::exception_ptr>&& */)
 
-#define LINGLONG_ERR_GETMACRO(_1, _2, _3, NAME, ...) /*NOLINT*/ NAME
-#define LINGLONG_ERR(...) /*NOLINT*/                                                        \
-    LINGLONG_ERR_GETMACRO(__VA_ARGS__, LINGLONG_ERR_3, LINGLONG_ERR_2, LINGLONG_ERR_1, ...) \
-    (__VA_ARGS__)
+template <typename... Args>
+auto LINGLONG_ERR_IMPL(
+  const char *file, int line, const char *function, const std::string &trace_msg, Args &&...args)
+{
+    return tl::unexpected(linglong::utils::error::Error::Err(file,
+                                                             line,
+                                                             function,
+                                                             trace_msg,
+                                                             std::forward<Args>(args)...));
+}
 
-// std::move is used for Result<Value>
-#define LINGLONG_ERR_1(_1) /*NOLINT*/                                           \
-    tl::unexpected(::linglong::utils::error::Error::Err(QT_MESSAGELOG_FILE,     \
-                                                        QT_MESSAGELOG_LINE,     \
-                                                        linglong_trace_message, \
-                                                        std::move((_1)) /*NOLINT*/))
-
-// std::move is used for Result<Value>
-#define LINGLONG_ERR_2(_1, _2) /*NOLINT*/                                       \
-    tl::unexpected(::linglong::utils::error::Error::Err(QT_MESSAGELOG_FILE,     \
-                                                        QT_MESSAGELOG_LINE,     \
-                                                        linglong_trace_message, \
-                                                        (_1),                   \
-                                                        std::move((_2)) /*NOLINT*/))
-
-#define LINGLONG_ERR_3(_1, _2, _3) /*NOLINT*/                                   \
-    tl::unexpected(::linglong::utils::error::Error::Err(QT_MESSAGELOG_FILE,     \
-                                                        QT_MESSAGELOG_LINE,     \
-                                                        linglong_trace_message, \
-                                                        (_1),                   \
-                                                        (_2),                   \
-                                                        (_3)))
+#define LINGLONG_ERR(...) /*NOLINT*/ \
+    LINGLONG_ERR_IMPL(__FILE__, __LINE__, __PRETTY_FUNCTION__, linglong_trace_message, __VA_ARGS__)
 
 #define LINGLONG_OK \
     {               \
     }
 
-#define LINGLONG_ERRV(...) /*NOLINT*/ LINGLONG_ERR(__VA_ARGS__).value()
+#define LINGLONG_ERRV(...) /*NOLINT*/         \
+    LINGLONG_ERR_IMPL(__FILE__,               \
+                      __LINE__,               \
+                      __PRETTY_FUNCTION__,    \
+                      linglong_trace_message, \
+                      __VA_ARGS__)            \
+      .value()
+
+// FIXME: remove later
+#include <QDebug>
 
 // https://github.com/AD-Vega/qarv/issues/22#issuecomment-1012011346
 #if QT_VERSION < QT_VERSION_CHECK(5, 14, 0)
@@ -382,6 +307,7 @@ static auto endl = ::endl;
 inline QDebug operator<<(QDebug debug, const linglong::utils::error::Error &err)
 {
     debug.noquote().nospace() << "[code " << err.code() << " ] message:" << Qt::endl
-                              << "\t" << err.message().replace("\n", "\n\t");
+                              << "\t"
+                              << QString::fromStdString(err.message()).replace("\n", "\n\t");
     return debug;
 }

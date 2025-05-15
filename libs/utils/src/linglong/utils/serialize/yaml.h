@@ -14,6 +14,9 @@
 #include <nlohmann/json.hpp>
 #include <yaml-cpp/yaml.h>
 
+#include <QFile>
+#include <QString>
+
 #include <exception>
 
 namespace linglong::utils::serialize {

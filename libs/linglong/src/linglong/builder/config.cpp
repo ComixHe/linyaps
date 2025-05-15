@@ -10,19 +10,22 @@
 #include "linglong/utils/error/error.h"
 #include "linglong/utils/serialize/yaml.h"
 
+#include <QDebug>
+#include <QFile>
+
 #include <fstream>
 
 namespace linglong::builder {
 
 auto loadConfig(const QString &file) noexcept -> utils::error::Result<api::types::v1::BuilderConfig>
 {
-    LINGLONG_TRACE(QString("load build config from %1").arg(file));
+    LINGLONG_TRACE("load build config from " + file.toStdString());
 
     try {
         QFile f(file);
         qDebug() << "read build config file" << file;
         if (!f.open(QIODevice::ReadOnly)) {
-            return LINGLONG_ERR("read build config file", f);
+            return LINGLONG_ERR("read build config file", f.errorString().toStdString());
         }
         auto data = f.readAll().toStdString();
         auto config = utils::serialize::LoadYAML<api::types::v1::BuilderConfig>(data);

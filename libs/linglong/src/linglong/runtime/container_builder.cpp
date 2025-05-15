@@ -37,7 +37,7 @@ auto getPatchesForApplication(const QString &appID) noexcept
         return {};
     }
 
-    LINGLONG_TRACE(QString("get OCI patches for application %1").arg(appID));
+    LINGLONG_TRACE("get OCI patches for application " + appID.toStdString());
 
     auto config =
       utils::serialize::LoadYAMLFile<api::types::v1::ApplicationConfiguration>(filePath);
@@ -96,7 +96,7 @@ void applyJSONPatch(nlohmann::json &cfg,
 
 void applyJSONFilePatch(ocppi::runtime::config::types::Config &cfg, const QFileInfo &info) noexcept
 {
-    LINGLONG_TRACE(QString("apply oci runtime config patch file %1").arg(info.absoluteFilePath()));
+    LINGLONG_TRACE("apply oci runtime config patch file " + info.absoluteFilePath().toStdString());
 
     auto patch = utils::serialize::LoadJSONFile<api::types::v1::OciConfigurationPatch>(
       info.absoluteFilePath());
@@ -121,7 +121,7 @@ void applyJSONFilePatch(ocppi::runtime::config::types::Config &cfg, const QFileI
 void applyExecutablePatch(ocppi::runtime::config::types::Config &cfg,
                           const QFileInfo &info) noexcept
 {
-    LINGLONG_TRACE(QString("process oci configuration generator %1").arg(info.absoluteFilePath()));
+    LINGLONG_TRACE("process oci configuration generator " + info.absoluteFilePath().toStdString());
 
     QProcess generatorProcess;
     generatorProcess.setProgram(info.absoluteFilePath());
@@ -152,7 +152,7 @@ void applyExecutablePatch(ocppi::runtime::config::types::Config &cfg,
     auto result = generatorProcess.readAllStandardOutput();
     auto modified = utils::serialize::LoadJSON<ocppi::runtime::config::types::Config>(result);
     if (!modified) {
-        qCritical() << LINGLONG_ERRV("parse stdout", modified);
+        qCritical() << LINGLONG_ERRV("parse stdout", std::move(modified));
         Q_ASSERT(false);
         return;
     }

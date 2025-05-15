@@ -33,7 +33,7 @@ public:
 
     static auto New(const QString &filePath) -> error::Result<GKeyFileWrapper>
     {
-        LINGLONG_TRACE(QString("create GKeyFileWrapper for %1").arg(filePath));
+        LINGLONG_TRACE("create GKeyFileWrapper for" + filePath.toStdString());
 
         auto desktopEntryFile = QFile(filePath);
         if (!desktopEntryFile.exists()) {
@@ -64,7 +64,8 @@ public:
     template <typename Value>
     auto getValue(const QString &key, const GroupName &group) const -> error::Result<Value>
     {
-        LINGLONG_TRACE(QString("get %1 from %2").arg(key, group));
+        LINGLONG_TRACE("get value of " + key.toStdString() + " from " + group.toStdString()
+                       + " group");
 
         g_autoptr(GError) gErr = nullptr;
         g_autofree gchar *value = g_key_file_get_string(this->gKeyFile.get(),
@@ -95,7 +96,7 @@ public:
 
     auto getkeys(const QString &group) -> error::Result<QStringList>
     {
-        LINGLONG_TRACE("get keys from " + group);
+        LINGLONG_TRACE("get keys from " + group.toStdString());
 
         g_autoptr(GError) gErr = nullptr;
         gsize length{ 0 };
@@ -118,7 +119,7 @@ public:
 
     auto saveToFile(const QString &filepath) -> error::Result<void>
     {
-        LINGLONG_TRACE(QString("save to %1").arg(filepath));
+        LINGLONG_TRACE("save to " + filepath.toStdString());
 
         g_autoptr(GError) gErr = nullptr;
 
@@ -132,7 +133,7 @@ public:
 
     auto hasKey(const QString &key, const GroupName &group) -> error::Result<bool>
     {
-        LINGLONG_TRACE(QString("check %1 is in %2 or not").arg(key, group));
+        LINGLONG_TRACE("check key " + key.toStdString() + " in " + group.toStdString() + " group");
 
         g_autoptr(GError) gErr = nullptr;
         if (g_key_file_has_key(this->gKeyFile.get(),

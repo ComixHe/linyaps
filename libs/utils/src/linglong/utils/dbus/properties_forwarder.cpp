@@ -52,8 +52,8 @@ error::Result<void> PropertiesForwarder::forward() noexcept
     msg.setArguments({ this->interface, this->propCache, QStringList{} });
 
     if (!connection.send(msg)) {
-        return LINGLONG_ERR(
-          QString{ "send dbus message failed: %1" }.arg(connection.lastError().message()));
+        return LINGLONG_ERR("send dbus message failed: "
+                            + connection.lastError().message().toStdString());
     }
 
     return LINGLONG_OK;

@@ -10,10 +10,10 @@
 #include <string>
 
 namespace linglong::utils {
-linglong::utils::error::Result<std::string> readFile(std::string filepath);
+linglong::utils::error::Result<std::string> readFile(const std::string &filepath) noexcept;
 
 linglong::utils::error::Result<void> writeFile(const std::string &filepath,
-                                               const std::string &content);
+                                               const std::string &content) noexcept;
 
 linglong::utils::error::Result<uintmax_t>
 calculateDirectorySize(const std::filesystem::path &dir) noexcept;
