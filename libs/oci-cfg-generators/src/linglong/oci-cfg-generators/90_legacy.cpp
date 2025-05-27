@@ -58,7 +58,7 @@ bool Legacy::generate(ocppi::runtime::config::types::Config &config) const noexc
         // when font cache solution implemented
         { "/var/cache/fontconfig", "/var/cache/fontconfig" },
         { "/usr/share/fonts", "/usr/share/fonts" },
-        { "/usr/lib/locale/", "/usr/lib/locale/" },
+        { "/usr/lib/locale", "/usr/lib/locale" },
         { "/usr/share/themes", "/usr/share/themes" },
         { "/usr/share/icons", "/usr/share/icons" },
         { "/usr/share/zoneinfo", "/usr/share/zoneinfo" },

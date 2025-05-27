@@ -10,7 +10,6 @@
 #include "linglong/oci-cfg-generators/builtins.h"
 #include "linglong/utils/configure.h"
 #include "linglong/utils/error/error.h"
-#include "linglong/utils/finally/finally.h"
 #include "linglong/utils/serialize/json.h"
 #include "linglong/utils/serialize/yaml.h"
 #include "ocppi/runtime/config/types/Generators.hpp"
@@ -21,7 +20,6 @@
 #include <QTemporaryDir>
 
 #include <fstream>
-#include <unordered_set>
 
 #include <fcntl.h>
 
@@ -94,37 +92,38 @@ void applyJSONPatch(nlohmann::json &cfg,
     }
 }
 
-void applyJSONFilePatch(ocppi::runtime::config::types::Config &cfg, const QFileInfo &info) noexcept
+void applyJSONFilePatch(ocppi::runtime::config::types::Config &cfg,
+                        const std::filesystem::path &patch) noexcept
 {
-    LINGLONG_TRACE(QString("apply oci runtime config patch file %1").arg(info.absoluteFilePath()));
+    LINGLONG_TRACE(QString("apply oci runtime config patch file %1").arg(patch.c_str()));
 
-    auto patch = utils::serialize::LoadJSONFile<api::types::v1::OciConfigurationPatch>(
-      info.absoluteFilePath());
-    if (!patch) {
-        qWarning() << LINGLONG_ERRV(patch);
+    auto patchRet = utils::serialize::LoadJSONFile<api::types::v1::OciConfigurationPatch>(patch);
+    if (!patchRet) {
+        qWarning() << LINGLONG_ERRV(patchRet);
         Q_ASSERT(false);
         return;
     }
+    const auto &content = *patchRet;
 
-    if (cfg.ociVersion != patch->ociVersion) {
+    if (cfg.ociVersion != content.ociVersion) {
         qWarning() << "ociVersion mismatched:"
-                   << nlohmann::json(*patch).dump(-1, ' ', true).c_str();
+                   << nlohmann::json(content).dump(-1, ' ', true).c_str();
         Q_ASSERT(false);
         return;
     }
 
     auto raw = nlohmann::json(cfg);
-    applyJSONPatch(raw, *patch);
+    applyJSONPatch(raw, content);
     cfg = raw.get<ocppi::runtime::config::types::Config>();
 }
 
 void applyExecutablePatch(ocppi::runtime::config::types::Config &cfg,
-                          const QFileInfo &info) noexcept
+                          const std::filesystem::path &patch) noexcept
 {
-    LINGLONG_TRACE(QString("process oci configuration generator %1").arg(info.absoluteFilePath()));
+    LINGLONG_TRACE(QString("process oci configuration generator %1").arg(patch.c_str()));
 
     QProcess generatorProcess;
-    generatorProcess.setProgram(info.absoluteFilePath());
+    generatorProcess.setProgram(patch.c_str());
     generatorProcess.start();
     generatorProcess.write(QByteArray::fromStdString(nlohmann::json(cfg).dump()));
     generatorProcess.closeWriteChannel();
@@ -138,15 +137,15 @@ void applyExecutablePatch(ocppi::runtime::config::types::Config &cfg,
 
     auto error = generatorProcess.readAllStandardError();
     if (generatorProcess.exitCode() != 0) {
-        qCritical() << "generator" << info.absoluteFilePath() << "return"
-                    << generatorProcess.exitCode() << "\ninput:\n"
+        qCritical() << "generator" << patch.c_str() << "return" << generatorProcess.exitCode()
+                    << "\ninput:\n"
                     << nlohmann::json(cfg).dump().c_str() << "\n\nstderr:\n"
                     << qPrintable(error);
         Q_ASSERT(false);
         return;
     }
     if (not error.isEmpty()) {
-        qDebug() << "generator" << info.absoluteFilePath() << "stderr:" << error;
+        qDebug() << "generator" << patch.c_str() << "stderr:" << error;
     }
 
     auto result = generatorProcess.readAllStandardOutput();
@@ -160,28 +159,46 @@ void applyExecutablePatch(ocppi::runtime::config::types::Config &cfg,
     cfg = *modified;
 }
 
-void applyPatches(ocppi::runtime::config::types::Config &cfg, const QFileInfoList &patches) noexcept
+void applyPatches(ocppi::runtime::config::types::Config &cfg,
+                  const std::vector<std::filesystem::directory_entry> &patches) noexcept
 {
     const auto &builtins = linglong::generator::builtin_generators();
-    for (const auto &info : patches) {
-        if (!info.isFile()) {
-            qWarning() << "info is not file:" << info.absoluteFilePath();
+    std::error_code ec;
+    for (const auto &patch : patches) {
+        const auto &path = patch.path();
+        auto status = patch.symlink_status(ec);
+        if (ec) {
+            qWarning() << "check patch file" << path.c_str() << "failed:" << ec.message().c_str();
             continue;
         }
 
-        if (info.completeSuffix() == "json") {
-            applyJSONFilePatch(cfg, info);
+        if (!patch.is_regular_file(ec)) {
+            if (ec) {
+                qWarning() << "check patch file" << path.c_str()
+                           << "failed:" << ec.message().c_str();
+                continue;
+            }
+
+            qWarning() << "patch is not a regular file:" << path.c_str();
             continue;
         }
 
-        if (info.isExecutable()) {
-            applyExecutablePatch(cfg, info);
+        if (path.has_extension() && path.extension() == ".json") {
+            applyJSONFilePatch(cfg, patch);
             continue;
         }
 
-        auto gen = builtins.find(info.completeBaseName().toStdString());
+        if ((status.permissions()
+             & (std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec
+                | std::filesystem::perms::others_exec))
+            != std::filesystem::perms::none) {
+            applyExecutablePatch(cfg, patch);
+            continue;
+        }
+
+        auto gen = builtins.find(path.filename().string());
         if (gen == builtins.cend()) {
-            qDebug() << "unsupported generator:" << info.absoluteFilePath();
+            qDebug() << "unsupported generator:" << path.c_str();
             continue;
         }
 
@@ -208,63 +225,71 @@ void applyPatches(ocppi::runtime::config::types::Config &cfg,
     cfg = raw.get<ocppi::runtime::config::types::Config>();
 }
 
-auto fixMount(ocppi::runtime::config::types::Config config) noexcept
-  -> utils::error::Result<ocppi::runtime::config::types::Config>
+auto fixMount(ocppi::runtime::config::types::Config &config) noexcept -> utils::error::Result<void>
 {
 
     LINGLONG_TRACE("fix mount points.")
 
     if (!config.mounts || !config.root) {
-        return config;
+        return LINGLONG_OK;
     }
 
-    auto originalRoot = QDir{ QString::fromStdString(config.root.value().path) };
-    config.root = { { .path = "rootfs", .readonly = false } };
+    std::error_code ec;
+    auto originalRoot = std::filesystem::canonical(config.root->path, ec);
+    if (ec) {
+        return LINGLONG_ERR(ec.message().c_str());
+    }
+
+    config.root->path = "rootfs";
+    config.root->readonly = false;
 
     auto &mounts = config.mounts.value();
-    auto commonParent = [](const QString &path1, const QString &path2) {
-        QString ret = path2;
-        while (!path1.startsWith(ret)) {
-            ret.chop(1);
-        }
-        if (ret.isEmpty()) {
-            return ret;
-        }
-        while (!ret.endsWith('/')) {
-            ret.chop(1);
-        }
-        return QDir::cleanPath(ret);
-    };
-
-    QStringList tmpfsPath;
+    std::vector<std::filesystem::path> tmpfsPath;
     for (const auto &mount : mounts) {
         if (mount.destination.empty() || mount.destination.at(0) != '/') {
             continue;
         }
 
-        auto hostSource = QDir::cleanPath(
-          originalRoot.filePath(QString::fromStdString(mount.destination.substr(1))));
-        if (QFileInfo::exists(hostSource)) {
+        auto destView =
+          std::string_view(mount.destination.c_str() + 1, mount.destination.size() - 1);
+        auto hostSource = originalRoot / destView;
+        if (std::filesystem::exists(hostSource, ec)) {
             continue;
         }
 
-        auto elem = hostSource.split(QDir::separator());
-        while (!elem.isEmpty() && !QFile::exists(elem.join(QDir::separator()))) {
-            elem.removeLast();
+        if (ec) {
+            qWarning() << "failed to check host source:" << hostSource.c_str() << ":"
+                       << ec.message().c_str();
+            continue;
         }
 
-        if (elem.isEmpty()) {
+        auto existsPath = hostSource;
+        while (!existsPath.empty()) {
+            std::ignore = std::filesystem::symlink_status(existsPath, ec);
+            if (!ec) {
+                break;
+            }
+
+            if (ec == std::errc::no_such_file_or_directory) {
+                existsPath = existsPath.parent_path();
+                continue;
+            }
+
+            qWarning() << "failed to check host source:" << existsPath.c_str() << ":"
+                       << ec.message().c_str();
+            existsPath.clear();
+        }
+
+        if (existsPath.empty()) {
             qWarning() << "invalid host source:" << hostSource;
             continue;
         }
 
-        bool newTmp{ true };
-        auto existsPath = elem.join(QDir::separator());
-        auto originalRootPath = QDir::cleanPath(originalRoot.absolutePath());
-        if (existsPath <= originalRootPath) {
+        if (existsPath <= originalRoot) {
             continue;
         }
 
+        bool newTmp{ true };
         for (const auto &it : tmpfsPath) {
             if (existsPath == it) {
                 newTmp = false;
@@ -273,76 +298,96 @@ auto fixMount(ocppi::runtime::config::types::Config config) noexcept
         }
 
         if (newTmp) {
-            tmpfsPath.push_back(existsPath);
+            tmpfsPath.emplace_back(std::move(existsPath));
         }
     }
 
     using MountType = std::remove_reference_t<decltype(mounts)>::value_type;
-    auto rootBinds =
-      originalRoot.entryInfoList(QDir::Dirs | QDir::Files | QDir::System | QDir::NoDotAndDotDot);
+    auto rootItemIt = std::filesystem::directory_iterator{
+        originalRoot,
+        std::filesystem::directory_options::skip_permission_denied,
+        ec
+    };
+    if (ec) {
+        return LINGLONG_ERR(ec.message().c_str());
+    }
+
     auto pos = mounts.begin();
-    for (const auto &bind : rootBinds) {
+    for (const auto &entry : rootItemIt) {
         auto mountPoint = MountType{
-            .destination = ("/" + bind.fileName()).toStdString(),
-            .gidMappings = {},
+            .destination = "/" / entry.path().filename(),
             .options = { { "rbind", "ro" } },
-            .source = bind.absoluteFilePath().toStdString(),
+            .source = entry.path(),
             .type = "bind",
-            .uidMappings = {},
         };
-        if (bind.isSymLink()) {
+
+        auto status = std::filesystem::symlink_status(entry.path(), ec);
+        if (ec) {
+            return LINGLONG_ERR(ec.message().c_str());
+        }
+
+        if (status.type() == std::filesystem::file_type::symlink) {
             mountPoint.options->emplace_back("copy-symlink");
         }
+
         pos = mounts.insert(pos, std::move(mountPoint));
         ++pos;
     }
 
     for (const auto &tmpfs : tmpfsPath) {
-        pos = mounts.insert(
-          pos,
-          MountType{
-            .destination = tmpfs.mid(originalRoot.absolutePath().size()).toStdString(),
-            .gidMappings = {},
-            .options = { { "nodev", "nosuid", "mode=755" } },
-            .source = "tmpfs",
-            .type = "tmpfs",
-            .uidMappings = {},
-          });
+        pos = mounts.emplace(pos,
+                             MountType{
+                               .destination = "/" / tmpfs.lexically_relative(originalRoot),
+                               .options = { { "nodev", "nosuid", "mode=755" } },
+                               .source = "tmpfs",
+                               .type = "tmpfs",
+                             });
         ++pos;
 
-        auto dir = QDir{ tmpfs };
-        for (const auto &rootDest :
-             dir.entryInfoList(QDir::Dirs | QDir::Files | QDir::System | QDir::NoDotAndDotDot)) {
-            auto rootDestPath = rootDest.absoluteFilePath();
-            auto destination = rootDestPath.mid(originalRoot.absolutePath().size());
+        auto dirIt = std::filesystem::directory_iterator{
+            tmpfs,
+            std::filesystem::directory_options::skip_permission_denied,
+            ec
+        };
+        if (ec) {
+            return LINGLONG_ERR(ec.message().c_str());
+        }
+
+        for (const auto &entry : dirIt) {
             auto mountPoint = MountType{
-                .destination = destination.toStdString(),
-                .gidMappings = {},
+                .destination = "/" / entry.path().lexically_relative(originalRoot),
                 .options = { { "rbind", "ro" } },
-                .source = rootDestPath.toStdString(),
+                .source = entry.path(),
                 .type = "bind",
-                .uidMappings = {},
             };
-            if (rootDest.isSymLink()) {
+
+            if (std::filesystem::is_symlink(entry.path(), ec)) {
                 mountPoint.options->emplace_back("copy-symlink");
             }
-            pos = mounts.insert(pos, std::move(mountPoint));
+
+            if (ec) {
+                return LINGLONG_ERR(ec.message().c_str());
+            }
+
+            pos = mounts.emplace(pos, std::move(mountPoint));
             ++pos;
         }
     }
 
     // remove extra mount points
     std::unordered_set<std::string> dups;
-    for (auto it = mounts.crbegin(); it != mounts.crend(); ++it) {
+    for (auto it = mounts.rbegin(); it != mounts.rend();) {
         if (dups.find(it->destination) != dups.end()) {
-            mounts.erase(std::next(it).base());
+            auto next_forward = mounts.erase(std::prev(it.base()));
+            it = std::make_reverse_iterator(next_forward);
             continue;
         }
 
-        dups.insert(it->destination);
+        dups.emplace(it->destination);
+        ++it;
     }
 
-    return config;
+    return LINGLONG_OK;
 };
 
 } // namespace
@@ -367,10 +412,12 @@ auto ContainerBuilder::create(const ContainerOptions &opts) noexcept
         return LINGLONG_ERR(QString{ "invalid bundle directory: %1" }.arg(bundle.c_str()));
     }
 
-    auto originalConfig = getOCIConfig(opts);
-    if (!originalConfig) {
-        return LINGLONG_ERR(originalConfig);
+    auto configRet = getOCIConfig(opts);
+    if (!configRet) {
+        return LINGLONG_ERR(configRet);
     }
+
+    auto config = std::move(configRet).value();
     // save env to /run/user/1000/linglong/xxx/00env.sh, mount it to /etc/profile.d/00env.sh
     auto envShFile = bundle / "00env.sh";
     {
@@ -380,7 +427,7 @@ auto ContainerBuilder::create(const ContainerOptions &opts) noexcept
             return LINGLONG_ERR("create 00env.sh failed in bundle directory");
         }
 
-        for (const auto &env : originalConfig->process->env.value()) {
+        for (const auto &env : config.process->env.value()) {
             const QString envStr = QString::fromStdString(env);
             auto pos = envStr.indexOf("=");
             auto value = envStr.mid(pos + 1, envStr.length());
@@ -397,7 +444,7 @@ auto ContainerBuilder::create(const ContainerOptions &opts) noexcept
         ofs.close();
     }
 
-    originalConfig->mounts->push_back(ocppi::runtime::config::types::Mount{
+    config.mounts->push_back(ocppi::runtime::config::types::Mount{
       .destination = "/etc/profile.d/00env.sh",
       .gidMappings = {},
       .options = { { "ro", "rbind" } },
@@ -406,21 +453,18 @@ auto ContainerBuilder::create(const ContainerOptions &opts) noexcept
       .uidMappings = {},
     });
 
-    auto config = fixMount(*originalConfig);
-    if (!config) {
-        return LINGLONG_ERR(config);
+    auto ret = fixMount(config);
+    if (!ret) {
+        return LINGLONG_ERR(ret);
     }
 
     // ensure container root exists
-    auto containerRoot = bundle / config->root->path;
+    auto containerRoot = bundle / config.root->path;
     if (!std::filesystem::create_directories(containerRoot, ec) && ec) {
         return LINGLONG_ERR("failed to create container root", ec);
     }
 
-    return std::make_unique<Container>(std::move(config).value(),
-                                       opts.appID,
-                                       opts.containerID,
-                                       this->cli);
+    return std::make_unique<Container>(std::move(config), opts.appID, opts.containerID, this->cli);
 }
 
 auto ContainerBuilder::createWithConfig(const ocppi::runtime::config::types::Config &originalConfig,
@@ -495,10 +539,24 @@ auto ContainerBuilder::getOCIConfig(const ContainerOptions &opts) noexcept
     }
     config->annotations = std::move(annotations);
 
-    QDir configDotDDir{ (containerConfigFilePath.parent_path() / "config.d").c_str() };
-    Q_ASSERT(configDotDDir.exists());
+    auto configDotDDir = std::filesystem::directory_iterator{
+        containerConfigFilePath.parent_path() / "config.d",
+        std::filesystem::directory_options::skip_permission_denied,
+        ec
+    };
+    if (ec) {
+        return LINGLONG_ERR("failed to check container configuration directory", ec);
+    }
 
-    applyPatches(*config, configDotDDir.entryInfoList(QDir::Files));
+    std::vector<std::filesystem::directory_entry> patches;
+    for (const auto &entry : configDotDDir) {
+        patches.emplace_back(entry.path());
+    }
+    std::sort(patches.begin(), patches.end(), [](const auto &a, const auto &b) {
+        return a.path().filename() < b.path().filename();
+    });
+
+    applyPatches(*config, patches);
 
     auto appPatches = getPatchesForApplication(opts.appID);
 
