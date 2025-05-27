@@ -75,53 +75,54 @@ bool Devices::generate(ocppi::runtime::config::types::Config &config) const noex
     std::error_code ec;
     auto mediaDir = std::filesystem::path("/media");
     auto status = std::filesystem::symlink_status(mediaDir, ec);
-    if (ec && ec != std::errc::no_such_file_or_directory) {
-        std::cerr << "failed to get /media status of "
-                  << ": " << ec.message() << std::endl;
-        return false;
+    if (ec) {
+        if (ec == std::errc::no_such_file_or_directory) {
+            config.mounts = std::move(mounts);
+            return true;
+        }
+
+        std::cerr << "failed to get /media status:" << ec.message() << ", ignore media mount."
+                  << std::endl;
+        return true;
     }
 
+    auto media = ocppi::runtime::config::types::Mount{
+        .destination = "/media",
+        .options = string_list{ "rbind", "rshared" },
+        .source = "/media",
+        .type = "bind",
+    };
+
     if (status.type() == std::filesystem::file_type::symlink) {
+        media.options = string_list{ "copy-symlink", "nosymfollow" };
+
         auto targetDir = std::filesystem::read_symlink(mediaDir, ec);
         if (ec) {
             std::cerr << "failed to resolve symlink." << std::endl;
             return false;
         }
 
-        auto destinationDir = "/" + targetDir.string();
+        auto dest = targetDir;
+        if (targetDir.is_relative()) {
+            dest = mediaDir.parent_path() / targetDir;
+        }
 
-        if (!std::filesystem::exists(destinationDir, ec)) {
-            if (ec) {
-                std::cerr << "check destination dir existence." << std::endl;
-                return false;
-            }
-
-            std::cerr << "destination path not found." << std::endl;
+        dest = std::filesystem::canonical(dest, ec);
+        if (ec) {
+            std::cerr << "failed to get canonical path of media destination:" << ec.message()
+                      << std::endl;
             return false;
         }
 
         mounts.push_back(ocppi::runtime::config::types::Mount{
-          .destination = destinationDir,
+          .destination = dest,
           .options = string_list{ "rbind", "rshared" },
-          .source = destinationDir,
-          .type = "bind",
-        });
-
-        mounts.push_back(ocppi::runtime::config::types::Mount{
-          .destination = "/media",
-          .options = string_list{ "rbind", "ro", "nosymfollow", "copy-symlink" },
-          .source = "/media",
-          .type = "bind",
-        });
-    } else {
-        mounts.push_back(ocppi::runtime::config::types::Mount{
-          .destination = "/media",
-          .options = string_list{ "rbind", "rshared" },
-          .source = "/media",
+          .source = dest,
           .type = "bind",
         });
     }
 
+    mounts.emplace_back(std::move(media));
     config.mounts = std::move(mounts);
     return true;
 }
