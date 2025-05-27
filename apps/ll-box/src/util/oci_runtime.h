@@ -41,16 +41,21 @@ struct Root
     std::optional<bool> readonly;
 };
 
-LLJS_FROM_OBJ(Root)
+inline void from_json(const nlohmann::json &j, Root &o)
 {
-    LLJS_FROM(path);
-    LLJS_FROM_OPT(readonly);
+    o.path = j.at("path").get<std::string>();
+    o.readonly = j.at("readonly").get<std::optional<bool>>();
 }
 
-LLJS_TO_OBJ(Root)
+inline void to_json(nlohmann::json &j, const Root &o)
 {
-    LLJS_TO(path);
-    LLJS_TO(readonly);
+    j["path"] = o.path;
+    // workaround for https://github.com/nlohmann/json/pull/4742
+    if (o.readonly) {
+        j["readonly"] = *o.readonly;
+    } else {
+        j["readonly"] = nullptr;
+    }
 }
 
 const static std::map<std::string_view, int> capsMap{
@@ -134,8 +139,8 @@ inline void from_json(const nlohmann::json &j, Process &o)
     o.args = j.at("args").get<util::str_vec>();
     o.env = j.at("env").get<util::str_vec>();
     o.cwd = j.at("cwd").get<std::string>();
-    if (j.find("capabilities") != j.end()) {
-        o.capabilities = j.at("capabilities").get<Capabilities>();
+    if (auto it = j.find("capabilities"); it != j.end()) {
+        o.capabilities = it->get<Capabilities>();
     }
 }
 
@@ -145,7 +150,7 @@ inline void to_json(nlohmann::json &j, const Process &o)
     j["env"] = o.env;
     j["cwd"] = o.cwd;
     if (o.capabilities) {
-        j["capabilities"] = o.capabilities;
+        j["capabilities"] = *o.capabilities;
     }
 }
 
@@ -490,7 +495,11 @@ inline void to_json(nlohmann::json &j, const Linux &o)
     j["namespaces"] = o.namespaces;
     j["uidMappings"] = o.uidMappings;
     j["gidMappings"] = o.gidMappings;
-    j["seccomp"] = o.seccomp;
+
+    if (o.seccomp) {
+        j["seccomp"] = *o.seccomp;
+    }
+
     j["cgroupsPath"] = o.cgroupsPath;
     j["resources"] = o.resources;
 }
@@ -539,8 +548,13 @@ inline void from_json(const nlohmann::json &j, Hook &o)
 inline void to_json(nlohmann::json &j, const Hook &o)
 {
     j["path"] = o.path;
-    j["args"] = o.args;
-    j["env"] = o.env;
+    if (o.args) {
+        j["args"] = *o.args;
+    }
+
+    if (o.env) {
+        j["env"] = *o.env;
+    }
 }
 
 struct Hooks
@@ -561,10 +575,21 @@ inline void from_json(const nlohmann::json &j, Hooks &o)
 
 inline void to_json(nlohmann::json &j, const Hooks &o)
 {
-    j["poststop"] = o.poststop;
-    j["poststart"] = o.poststart;
-    j["prestart"] = o.prestart;
-    j["startContainer"] = o.startContainer;
+    if (o.poststop) {
+        j["poststop"] = *o.poststop;
+    }
+
+    if (o.poststart) {
+        j["poststart"] = *o.poststart;
+    }
+
+    if (o.prestart) {
+        j["prestart"] = *o.prestart;
+    }
+
+    if (o.startContainer) {
+        j["startContainer"] = *o.startContainer;
+    }
 }
 
 struct Runtime
@@ -595,10 +620,15 @@ inline void to_json(nlohmann::json &j, const Runtime &o)
     j["ociVersion"] = o.version;
     j["hostname"] = o.hostname;
     j["process"] = o.process;
-    j["mounts"] = o.mounts;
+    if (o.mounts) {
+        j["mounts"] = *o.mounts;
+    }
+
     j["linux"] = o.linux;
     j["root"] = o.root;
-    j["hooks"] = o.hooks;
+    if (o.hooks) {
+        j["hooks"] = *o.hooks;
+    }
 }
 
 inline static Runtime fromFile(const std::string &filepath)
