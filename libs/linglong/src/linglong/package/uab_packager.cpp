@@ -655,30 +655,6 @@ utils::error::Result<void> UABPackager::prepareBundle(const QDir &bundleDir, boo
         return LINGLONG_ERR(QString{ "couldn't create directory %1" }.arg(extraDir.absolutePath()));
     }
 
-    // generate ld configs
-    auto arch = Architecture::currentCPUArchitecture();
-    auto ldConfsDir = QDir{ extraDir.absoluteFilePath("ld.conf.d") };
-    if (!ldConfsDir.mkpath(".")) {
-        return LINGLONG_ERR(
-          QString{ "couldn't create directory %1" }.arg(ldConfsDir.absolutePath()));
-    }
-
-    auto ldConf = QFile{ ldConfsDir.absoluteFilePath("zz_deepin-linglong-app.ld.so.conf") };
-    if (!ldConf.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        return LINGLONG_ERR(ldConf);
-    }
-
-    QTextStream stream{ &ldConf };
-    stream << "/runtime/usr/lib/" << Qt::endl; // for only-app
-    stream << "/runtime/lib/" << Qt::endl;
-    stream << "/runtime/lib/" + arch->getTriplet() << Qt::endl;
-    stream << "/opt/apps/" + appID + "/files/lib" << Qt::endl;
-    stream << "/opt/apps/" + appID + "/files/lib/" + arch->getTriplet() << Qt::endl;
-    if (onlyApp) {
-        stream << "include /etc/ld.so.conf" << Qt::endl;
-    }
-    stream.flush();
-
     // copy ll-box
     auto boxBin = !defaultBox.isEmpty() ? defaultBox : QStandardPaths::findExecutable("ll-box");
     if (boxBin.isEmpty()) {
