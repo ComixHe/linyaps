@@ -32,6 +32,7 @@
 #include "linglong/repo/config.h"
 #include "linglong/runtime/container_builder.h"
 #include "linglong/runtime/run_context.h"
+#include "linglong/utils/bash_quote.h"
 #include "linglong/utils/error/error.h"
 #include "linglong/utils/finally/finally.h"
 #include "linglong/utils/gettext.h"
@@ -42,6 +43,7 @@
 #include "ocppi/runtime/Signal.hpp"
 #include "ocppi/types/ContainerListItem.hpp"
 
+#include <linux/un.h>
 #include <nlohmann/json.hpp>
 
 #include <QCryptographicHash>
@@ -525,6 +527,87 @@ Cli::Cli(Printer &printer,
     }
 }
 
+static bool delegateToContainerInit(const std::string &appID,
+                                    std::vector<std::string> commands) noexcept
+{
+    auto containerSocket = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
+    if (containerSocket == -1) {
+        return false;
+    }
+
+    auto cleanup = utils::finally::finally([containerSocket] {
+        ::close(containerSocket);
+    });
+
+    struct sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    addr.sun_path[0] = 0;
+
+    constexpr size_t ABSTRACT_PATH_MAX = sizeof(addr.sun_path) - 1;
+    auto begin = appID.begin();
+    auto end = appID.end();
+    if (appID.size() > ABSTRACT_PATH_MAX) {
+        end = begin + ABSTRACT_PATH_MAX;
+    }
+
+    std::copy(begin, end, &addr.sun_path[1]);
+    addr.sun_path[1 + appID.size()] = 0;
+
+    auto ret = ::connect(containerSocket,
+                         reinterpret_cast<struct sockaddr *>(&addr),
+                         offsetof(sockaddr_un, sun_path) + 1 + end - begin);
+    if (ret == -1) {
+        return false;
+    }
+
+    std::string bashContent;
+    for (const auto &command : commands) {
+        bashContent.append(utils::quoteBashArg(command));
+        bashContent.push_back(' ');
+    }
+
+    commands.clear();
+    commands.push_back(bashContent);
+    commands.insert(commands.begin(), "-c");
+    commands.insert(commands.begin(), "--login");
+    commands.insert(commands.begin(), "bash");
+
+    std::string command_data;
+    for (const auto &command : commands) {
+        command_data.append(command);
+        command_data.push_back('\0');
+    }
+    command_data.push_back('\0');
+
+    std::uint64_t rest_len = command_data.size();
+    ret = ::send(containerSocket, &rest_len, sizeof(rest_len), 0);
+    if (ret == -1) {
+        return false;
+    }
+
+    while (rest_len > 0) {
+        auto send_len = ::send(containerSocket, command_data.c_str(), rest_len, 0);
+        if (send_len == -1) {
+            if (errno == EINTR) {
+                continue;
+            }
+
+            break;
+        }
+
+        rest_len -= send_len;
+    }
+
+    if (rest_len != 0) {
+        return false;
+    }
+
+    int result{ -1 };
+    ret = ::recv(containerSocket, &result, sizeof(result), 0);
+    qDebug() << "delegate result:" << result;
+    return result == 0;
+}
+
 int Cli::run([[maybe_unused]] CLI::App *subcommand)
 {
     LINGLONG_TRACE("command run");
@@ -643,47 +726,12 @@ int Cli::run([[maybe_unused]] CLI::App *subcommand)
             return -1;
         }
 
-        QStringList execArgs;
-        std::transform(commands.begin(),
-                       commands.end(),
-                       std::back_inserter(execArgs),
-                       [](const std::string &arg) {
-                           return QString::fromStdString(arg);
-                       });
-
-        // 为避免原始args包含空格，每个arg都使用单引号包裹，并对arg内部的单引号进行转义替换
-        std::for_each(execArgs.begin(), execArgs.end(), [](QString &arg) {
-            arg.replace("'", "'\\''");
-            arg.prepend('\'');
-            arg.push_back('\'');
-        });
-
-        // exec命令使用原始args中的进程替换bash进程
-        execArgs.prepend("exec");
-
-        // 在原始args前面添加bash --login -c，这样可以使用/etc/profile配置的环境变量
-        commands = std::vector<std::string>{ "/bin/bash",
-                                             "--login",
-                                             "-e",
-                                             "-c",
-                                             execArgs.join(' ').toStdString() };
-
-        auto opt = ocppi::runtime::ExecOption{
-            .uid = uid,
-            .gid = gid,
-        };
-
-        auto result = this->ociCLI.exec(container.id,
-                                        commands[0],
-                                        { commands.cbegin() + 1, commands.cend() },
-                                        opt);
-        if (!result) {
-            auto err = LINGLONG_ERRV(result);
-            this->printer.printErr(err);
-            return -1;
+        if (delegateToContainerInit(info.id, commands)) {
+            return 0;
         }
 
-        return 0;
+        // fallback to run
+        break;
     }
 
     auto *homeEnv = ::getenv("HOME");
