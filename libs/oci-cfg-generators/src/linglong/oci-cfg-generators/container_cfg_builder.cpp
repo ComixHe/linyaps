@@ -255,6 +255,12 @@ ContainerCfgBuilder &ContainerCfgBuilder::bindXDGRuntime(const std::filesystem::
 
 bool ContainerCfgBuilder::buildXDGRuntime() noexcept
 {
+    if (hostXDGRuntimeMountPoint.empty()) {
+        error_.reason = "host XDG_RUNTIME_DIR mount point is not set";
+        error_.code = BUILD_XDGRUNTIME_ERROR;
+        return false;
+    }
+
     std::error_code ec;
     std::filesystem::create_directories(hostXDGRuntimeMountPoint, ec);
     if (ec) {
