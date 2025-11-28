@@ -5,7 +5,6 @@
 #include "linglong/utils/filelock.h"
 
 #include "linglong/common/constants.h"
-#include "linglong/utils/finally/finally.h"
 #include "linglong/utils/log/log.h"
 
 #include <fmt/format.h>
@@ -47,12 +46,13 @@ utils::error::Result<FileLock> FileLock::create(std::filesystem::path path,
 
     unsigned int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW;
     if (create_if_missing) {
+        LogD("create lock file {} if missing", abs_path);
         flags |= O_CREAT;
     }
 
     auto fd = ::open(abs_path.c_str(), flags, default_file_mode);
     if (fd < 0) {
-        return LINGLONG_ERR(fmt::format("open file failed: {}", ::strerror(errno)));
+        return LINGLONG_ERR(fmt::format("open file {} failed: {}", abs_path, ::strerror(errno)));
     }
 
     locked_paths[abs_path] = true;
