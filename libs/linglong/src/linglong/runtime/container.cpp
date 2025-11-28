@@ -9,8 +9,10 @@
 #include "configure.h"
 #include "linglong/common/dir.h"
 #include "linglong/utils/bash_command_helper.h"
+#include "linglong/utils/filelock.h"
 #include "linglong/utils/finally/finally.h"
 #include "linglong/utils/log/log.h"
+#include "ocppi/runtime/ExecOption.hpp"
 #include "ocppi/runtime/RunOption.hpp"
 #include "ocppi/runtime/config/types/Generators.hpp"
 
@@ -128,8 +130,67 @@ Container::Container(ocppi::runtime::config::types::Config cfg,
     Q_ASSERT(cfg.process.has_value());
 }
 
+utils::error::Result<bool> Container::reuse(const std::vector<std::string> &commands) noexcept
+{
+    LINGLONG_TRACE(fmt::format("reuse container {}", this->id))
+
+    auto containerLock = common::dir::getBundleDir(id) / ".lock";
+    auto lockRet = utils::filelock::FileLock::create(containerLock, false);
+    if (!lockRet) {
+        // maybe the main container is initializing
+        return false;
+    }
+    auto lock = std::move(lockRet).value();
+
+    auto ret = lock.tryLock(utils::filelock::LockType::Read);
+    if (!ret) {
+        return LINGLONG_ERR(ret);
+    }
+
+    if (!*ret) {
+        return false;
+    }
+
+    {
+        std::ifstream in(containerLock);
+        std::string content;
+        in >> content;
+        if (content != "running") {
+            return false;
+        }
+    }
+
+    std::string script;
+    for (const auto &arg : commands) {
+        script.append(common::strings::quoteBashArg(arg));
+        script.push_back(' ');
+    }
+    script.pop_back();
+
+    const auto entrypoint = fmt::format("((source /etc/profile;exec {})& disown)& disown", script);
+    auto delegateCmds = utils::BashCommandHelper::generateBashCommandBase();
+    delegateCmds.push_back(entrypoint);
+    auto bin = delegateCmds.at(0);
+    std::vector<std::string> args;
+    std::move(delegateCmds.begin() + 1, delegateCmds.end(), std::back_inserter(args));
+
+    // prepare tty (waiting for box implements --tty/--console-socket)
+
+    if (auto ret = lock.unlock(); !ret) {
+        return LINGLONG_ERR(ret);
+    }
+
+    auto result =
+      cli.exec(id, bin, args, ocppi::runtime::ExecOption{ .uid = ::getuid(), .gid = ::getgid() });
+    if (!result) {
+        return LINGLONG_ERR(result);
+    }
+
+    return true;
+}
+
 utils::error::Result<void> Container::run(const ocppi::runtime::config::types::Process &process,
-                                          ocppi::runtime::RunOption &opt) noexcept
+                                          ocppi::runtime::RunOption opt) noexcept
 {
     LINGLONG_TRACE(fmt::format("run container {}", this->id));
 
@@ -209,7 +270,7 @@ utils::error::Result<void> Container::run(const ocppi::runtime::config::types::P
         return LINGLONG_ERR("make entrypoint executable", ec);
     }
 
-    auto entrypointPath = "/run/linglong/entrypoint.sh";
+    const auto *entrypointPath = "/run/linglong/entrypoint.sh";
 
     this->cfg.mounts->push_back(ocppi::runtime::config::types::Mount{
       .destination = entrypointPath,
@@ -218,7 +279,7 @@ utils::error::Result<void> Container::run(const ocppi::runtime::config::types::P
       .type = "bind",
     });
 
-    auto cmd = utils::BashCommandHelper::generateExecCommand(entrypointPath);
+    auto cmd = utils::BashCommandHelper::generateInitCommand(entrypointPath);
     this->cfg.process->args = cmd;
 
 #ifdef LINGLONG_FONT_CACHE_GENERATOR

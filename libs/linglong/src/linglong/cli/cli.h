@@ -198,6 +198,8 @@ private:
     void printProgress(const PMTaskState &state) noexcept;
     [[nodiscard]] utils::error::Result<std::vector<api::types::v1::CliContainer>>
     getCurrentContainers() const noexcept;
+    utils::error::Result<bool> reuseContainer(const package::Reference &appRef,
+                                             const std::vector<std::string> &command) noexcept;
     int installFromFile(const QFileInfo &fileInfo,
                         const api::types::v1::CommonOptions &commonOptions,
                         const std::string &appid);
