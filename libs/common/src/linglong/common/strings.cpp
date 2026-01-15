@@ -6,6 +6,8 @@
 
 #include "linglong/common/strings.h"
 
+#include <random>
+
 namespace linglong::common::strings {
 
 bool stringEqual(std::string_view str1, std::string_view str2, bool caseSensitive) noexcept
@@ -153,6 +155,25 @@ std::string quoteBashArg(std::string arg) noexcept
         }
     }
     return "'" + arg + "'";
+}
+
+std::string generateRandomString(std::size_t length) noexcept
+{
+    static constexpr std::string_view charset = "0123456789"
+                                                "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                                "abcdefghijklmnopqrstuvwxyz";
+
+    static thread_local std::mt19937 gen{ std::random_device{}() };
+    std::uniform_int_distribution<std::size_t> dis(0, charset.size() - 1);
+
+    std::string result;
+    result.reserve(length);
+
+    for (std::size_t i = 0; i < length; ++i) {
+        result += charset[dis(gen)];
+    }
+
+    return result;
 }
 
 } // namespace linglong::common::strings

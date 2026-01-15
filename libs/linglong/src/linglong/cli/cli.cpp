@@ -36,6 +36,7 @@
 #include "linglong/utils/bash_command_helper.h"
 #include "linglong/utils/error/error.h"
 #include "linglong/utils/file.h"
+#include "linglong/utils/filelock.h"
 #include "linglong/utils/finally/finally.h"
 #include "linglong/utils/gettext.h"
 #include "linglong/utils/runtime_config.h"
@@ -144,82 +145,6 @@ std::vector<std::string> getAutoModuleList() noexcept
 
     std::sort(result.begin(), result.end());
     return { result.begin(), std::unique(result.begin(), result.end()) };
-}
-
-bool delegateToContainerInit(const std::string &containerID,
-                             std::vector<std::string> commands) noexcept
-{
-    auto containerSocket = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
-    if (containerSocket == -1) {
-        return false;
-    }
-
-    auto cleanup = linglong::utils::finally::finally([containerSocket] {
-        ::close(containerSocket);
-    });
-
-    struct sockaddr_un addr{};
-    addr.sun_family = AF_UNIX;
-
-    auto bundleDir = linglong::common::dir::getBundleDir(containerID);
-    const std::string socketPath = bundleDir / "init/socket";
-
-    std::copy(socketPath.begin(), socketPath.end(), &addr.sun_path[0]);
-    addr.sun_path[socketPath.size() + 1] = 0;
-
-    auto ret = ::connect(containerSocket,
-                         reinterpret_cast<struct sockaddr *>(&addr),
-                         offsetof(sockaddr_un, sun_path) + socketPath.size());
-    if (ret == -1) {
-        return false;
-    }
-
-    std::string bashContent;
-    for (const auto &command : commands) {
-        bashContent.append(linglong::common::strings::quoteBashArg(command));
-        bashContent.push_back(' ');
-    }
-
-    commands.clear();
-    commands.push_back(bashContent);
-    commands.insert(commands.begin(), "-c");
-    commands.insert(commands.begin(), "--login");
-    commands.insert(commands.begin(), "bash");
-
-    std::string command_data;
-    for (const auto &command : commands) {
-        command_data.append(command);
-        command_data.push_back('\0');
-    }
-    command_data.push_back('\0');
-
-    std::uint64_t rest_len = command_data.size();
-    ret = ::send(containerSocket, &rest_len, sizeof(rest_len), 0);
-    if (ret == -1) {
-        return false;
-    }
-
-    while (rest_len > 0) {
-        auto send_len = ::send(containerSocket, command_data.c_str(), rest_len, 0);
-        if (send_len == -1) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            break;
-        }
-
-        rest_len -= send_len;
-    }
-
-    if (rest_len != 0) {
-        return false;
-    }
-
-    int result{ -1 };
-    ret = ::recv(containerSocket, &result, sizeof(result), 0);
-    qDebug() << "delegate result:" << result;
-    return result == 0;
 }
 
 } // namespace
@@ -462,6 +387,38 @@ Cli::Cli(Printer &printer,
     }
 }
 
+utils::error::Result<int> Cli::reuseContainer(const package::Reference &appRef,
+                                              const std::vector<std::string> &commands) noexcept
+{
+    LINGLONG_TRACE("reuse container")
+
+    auto containers = getCurrentContainers().value_or(std::vector<api::types::v1::CliContainer>{});
+    auto app = appRef.toString();
+
+    auto container = std::find_if(containers.cbegin(), containers.cend(), [&app](const auto &c) {
+        return c.package == app;
+    });
+
+    if (container == containers.cend()) {
+        return LINGLONG_ERR("container not found");
+    }
+
+    const auto id = container->id;
+    auto json = common::dir::getBundleDir(id) / "config.json";
+    auto cfg = utils::serialize::LoadJSONFile<ocppi::runtime::config::types::Config>(json);
+    if (!cfg) {
+        return LINGLONG_ERR(cfg);
+    }
+
+    auto containerRef = linglong::runtime::Container(std::move(cfg).value(), appRef.id, id, ociCLI);
+    auto reuseResult = containerRef.reuse(commands);
+    if (!reuseResult) {
+        return LINGLONG_ERR(reuseResult);
+    }
+
+    return *reuseResult;
+}
+
 int Cli::run(const RunOptions &options)
 {
     LINGLONG_TRACE("command run");
@@ -568,53 +525,47 @@ int Cli::run(const RunOptions &options)
     }
     commands = filePathMapping(commands, options);
 
-    // this lambda will dump reference of containerID, app, base and runtime to
-    // /run/linglong/getuid()/getpid() to store these needed infomation
-    auto dumpContainerInfo = [&pidFile, &runContext, this]() -> bool {
-        LINGLONG_TRACE("dump info")
-        std::error_code ec;
-        if (!std::filesystem::exists(pidFile, ec)) {
-            if (ec) {
-                qCritical() << "couldn't get status of" << pidFile.c_str() << ":"
-                            << ec.message().c_str();
-                return false;
-            }
+    auto runtimeDir = common::dir::getRuntimeDir();
+    if (auto ret = utils::ensureDirectory(runtimeDir); !ret) {
+        this->printer.printErr(ret.error());
+        return -1;
+    }
 
-            auto msg = "state file " + pidFile.string() + "doesn't exist, abort.";
-            qFatal("%s", msg.c_str());
-        }
+    const auto lock_name = fmt::format(".cli.{}.lock", curAppRef->id);
+    auto cliLockRet = utils::filelock::FileLock::create(runtimeDir / lock_name);
+    if (!cliLockRet) {
+        this->printer.printErr(cliLockRet.error());
+        return -1;
+    }
+    auto cli_lock = std::move(cliLockRet).value();
 
-        std::ofstream stream{ pidFile };
-        if (!stream.is_open()) {
-            auto msg = QString{ "failed to open %1" }.arg(pidFile.c_str());
-            this->printer.printErr(LINGLONG_ERRV(msg));
-            return false;
-        }
-        stream << nlohmann::json(runContext.stateInfo());
-        stream.close();
-
-        return true;
-    };
-
-    auto containers = getCurrentContainers().value_or(std::vector<api::types::v1::CliContainer>{});
-    for (const auto &container : containers) {
-        qDebug() << "found running container: " << container.package.c_str();
-        if (container.package != curAppRef->toString()) {
-            continue;
-        }
-
-        if (!dumpContainerInfo()) {
+    while (true) {
+        auto lock_ret = cli_lock.tryLock(utils::filelock::LockType::Write);
+        if (!lock_ret) {
+            this->printer.printErr(lock_ret.error());
             return -1;
         }
 
-        if (delegateToContainerInit(container.id, commands)) {
-            return 0;
+        if (*lock_ret) {
+            break;
         }
 
-        // fallback to run
-        break;
+        LogD("try to resuse container");
+        auto ret = reuseContainer(*curAppRef, commands);
+        if (!ret) {
+            this->printer.printErr(ret.error());
+            return -1;
+        }
+
+        if (*ret > 0) {
+            return *ret;
+        }
+
+        // reuse failed, try again
+        LogD("container reuse failed, try again");
     }
 
+    LogD("start a new container");
     auto *homeEnv = ::getenv("HOME");
     if (homeEnv == nullptr) {
         qCritical() << "Couldn't get HOME env.";
@@ -671,19 +622,42 @@ int Cli::run(const RunOptions &options)
         return -1;
     }
 
-    std::error_code ec;
-    auto socketDir = cfgBuilder.getBundlePath() / "init";
-    std::filesystem::create_directories(socketDir, ec);
-    if (ec) {
-        this->printer.printErr(LINGLONG_ERRV(ec.message().c_str()));
+    const auto hostContainerLockPath = cfgBuilder.getBundlePath() / ".lock";
+    auto containerLockRet = utils::filelock::FileLock::create(hostContainerLockPath);
+    if (!containerLockRet) {
+        this->printer.printErr(containerLockRet.error());
+        return -1;
+    }
+    auto containerLock = std::move(containerLockRet).value();
+
+    auto lockResult = containerLock.lock(utils::filelock::LockType::Write);
+    if (!lockResult) {
+        this->printer.printErr(lockResult.error());
         return -1;
     }
 
-    cfgBuilder.addExtraMount(
-      ocppi::runtime::config::types::Mount{ .destination = "/run/linglong/init",
-                                            .options = std::vector<std::string>{ "bind" },
-                                            .source = socketDir.string(),
-                                            .type = "bind" });
+    {
+        std::ofstream stream{ hostContainerLockPath };
+        if (!stream.is_open()) {
+            this->printer.printErr(LINGLONG_ERRV(
+              fmt::format("failed to open {}: {}", hostContainerLockPath, strerror(errno))));
+            return -1;
+        }
+
+        stream << "initializing";
+        if (stream.fail()) {
+            this->printer.printErr(LINGLONG_ERRV(
+              fmt::format("failed to write {}: {}", hostContainerLockPath, strerror(errno))));
+            return -1;
+        }
+    }
+
+    cfgBuilder.addExtraMount({
+      .destination = linglong::common::dir::containerLockPath,
+      .options = { { "bind" } },
+      .source = hostContainerLockPath,
+      .type = "bind",
+    });
 
     if (runtimeConfig && runtimeConfig->env) {
         for (const auto &[key, value] : *runtimeConfig->env) {
@@ -717,13 +691,43 @@ int Cli::run(const RunOptions &options)
         return -1;
     }
 
+    auto dumpContainerInfo = [&pidFile, &runContext, this]() -> bool {
+        LINGLONG_TRACE("dump info")
+        std::error_code ec;
+        if (!std::filesystem::exists(pidFile, ec)) {
+            if (ec) {
+                qCritical() << "couldn't get status of" << pidFile.c_str() << ":"
+                            << ec.message().c_str();
+                return false;
+            }
+
+            auto msg = "state file " + pidFile.string() + "doesn't exist, abort.";
+            qFatal("%s", msg.c_str());
+        }
+
+        std::ofstream stream{ pidFile };
+        if (!stream.is_open()) {
+            auto msg = QString{ "failed to open %1" }.arg(pidFile.c_str());
+            this->printer.printErr(LINGLONG_ERRV(msg));
+            return false;
+        }
+        stream << nlohmann::json(runContext.stateInfo());
+        stream.close();
+
+        return true;
+    };
+
     if (!dumpContainerInfo()) {
         return -1;
     }
 
-    ocppi::runtime::RunOption opt{};
+    if (auto ret = containerLock.unlock(); !ret) {
+        this->printer.printErr(ret.error());
+        return -1;
+    }
+
     auto result =
-      (*container)->run(ocppi::runtime::config::types::Process{ .args = std::move(commands) }, opt);
+      (*container)->run(ocppi::runtime::config::types::Process{ .args = std::move(commands) }, {});
     if (!result) {
         this->printer.printErr(result.error());
         return -1;

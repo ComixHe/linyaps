@@ -11,6 +11,8 @@ namespace linglong::common::dir {
 // linglong Runtime directory is $XDG_RUNTIME_DIR/linglong, for example:
 // /run/user/$UID/linglong
 // /tmp/linglong-runtime-$UID/linglong
+constexpr auto containerLockPath = "/run/linglong/.lock";
+
 std::filesystem::path getRuntimeDir() noexcept;
 
 std::filesystem::path getAppRuntimeDir(const std::string &appId) noexcept;

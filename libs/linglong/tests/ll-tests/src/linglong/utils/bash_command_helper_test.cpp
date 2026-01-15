@@ -27,7 +27,7 @@ TEST(BashCommandHelper, GenerateDefaultBashCommand)
 
 TEST(BashCommandHelper, GenerateExecCommand)
 {
-    auto cmd = BashCommandHelper::generateExecCommand("test-command");
+    auto cmd = BashCommandHelper::generateInitCommand("test-command");
     EXPECT_EQ(cmd.size(), 6);
     EXPECT_EQ(cmd[0], "/run/linglong/container-init");
     EXPECT_EQ(cmd[4], "-c");

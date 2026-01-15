@@ -21,8 +21,10 @@ public:
               std::filesystem::path bundleDir,
               ocppi::cli::CLI &cli);
 
+    utils::error::Result<int> reuse(const std::vector<std::string> &commands) noexcept;
+
     utils::error::Result<void> run(const ocppi::runtime::config::types::Process &process,
-                                   ocppi::runtime::RunOption &opt) noexcept;
+                                   ocppi::runtime::RunOption opt) noexcept;
 
 private:
     ocppi::runtime::config::types::Config cfg;
