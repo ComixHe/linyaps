@@ -56,6 +56,7 @@ struct RunContainerOptions
 
     CommonContainerOptions common;
 
+    std::string lockName;
     bool privileged{ false };
     std::map<std::string, std::string> env;
     std::vector<std::string> capabilities;

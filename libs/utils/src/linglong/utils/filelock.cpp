@@ -47,6 +47,7 @@ utils::error::Result<FileLock> FileLock::create(std::filesystem::path path,
 
     unsigned int flags = O_RDWR | O_CLOEXEC | O_NOFOLLOW;
     if (create_if_missing) {
+        LogD("create lock file {} if missing", abs_path);
         flags |= O_CREAT;
     }
 

@@ -15,8 +15,6 @@
 
 #include <utility>
 
-const auto TASK_DONE = 100;
-
 namespace linglong::service {
 
 PackageTask::PackageTask(std::function<void(Task &)> job, QObject *parent)
